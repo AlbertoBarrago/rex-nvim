@@ -232,6 +232,14 @@ STUB_APP= rex_nvim_open $loose/Main.java
 check "missing Rex app is launched" grep -q -- "open -g -b com.superlogical.rex" $STUB_LOG
 check "missing Rex app is reported" grep -q 'not running' $tmp/notify.log
 
+rex_nvim_parse_target "rex-nvim://open${loose// /%20}/Main.java?line=12&column=4"
+check "rex-nvim:// link gives file, line and column" test "$reply" = "$loose/Main.java 12 4"
+rex_nvim_parse_target "rex-nvim://open$tmp/my%20dir/a.ts?col=2&line=7&x=\$(id)"
+check "rex-nvim:// link decodes the path and ignores other keys" test "$reply" = "$tmp/my dir/a.ts 7 2"
+: > $STUB_LOG
+rex_nvim_open "rex-nvim://open$loose/Main.java?line=2"
+check "rex-nvim:// link opens like FILE:LINE" grep -q -- "nvim +2 -- $loose/Main.java\|$loose/Main.java" $STUB_LOG
+
 : > $loose/odd:7
 rex_nvim_parse_target $loose/odd:7
 check "an existing name with a colon is not split" test "$reply[1] $reply[2]" = "$loose/odd:7 0"

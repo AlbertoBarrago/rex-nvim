@@ -29,6 +29,9 @@ rex_nvim_build_app() {
   plutil -replace CFBundleName -string NvimOpen $plist
   # Background-only: no Dock icon flashing on every click.
   plutil -replace LSUIElement -bool true $plist
+  # rex-nvim:// links carry the line, unlike file:// ones (see lib/open.zsh).
+  # A scheme only this app claims needs no confirmation dialog.
+  plutil -replace CFBundleURLTypes -json '[{"CFBundleURLName": "rex-nvim file link", "CFBundleURLSchemes": ["rex-nvim"]}]' $plist
   # Where the applet looks for the CLI, for `rex-nvim doctor` to check.
   plutil -replace RexNvimBin -string $bin $plist
 

@@ -35,11 +35,29 @@ Without a plugin manager, `vim.opt.rtp:append(vim.fn.expand("~/Projects/rex-nvim
 
 `glow` is optional: without it Markdown opens in nvim too.
 
+### Links that jump to the line
+
+macOS hands a clicked `file://` link to the app without any line number. NvimOpen also handles its own scheme, `rex-nvim://open/<absolute path>?line=N&column=M`, which tools that emit OSC 8 hyperlinks can be told to use:
+
+```sh
+# ripgrep, e.g. in the file named by $RIPGREP_CONFIG_PATH
+--hyperlink-format=rex-nvim://open{path}?line={line}&column={column}
+```
+
+```ini
+# delta, in ~/.gitconfig
+[delta]
+	hyperlinks = true
+	hyperlinks-file-link-format = "rex-nvim://open{path}?line={line}"
+```
+
+Rex may ask before opening a link with a custom scheme (Settings, Terminal, Links). Any app or web page can open a `rex-nvim://` link too: all it can do is open a local path in nvim (or glow), never run anything, and the path is passed as an argument, not through a shell.
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `rex-nvim open FILE[:LINE[:COL]]...` | Open files as described above. This is what NvimOpen.app runs. |
+| `rex-nvim open FILE[:LINE[:COL]]\|URL...` | Open files (or `rex-nvim://` links) as described above. This is what NvimOpen.app runs. |
 | `rex-nvim edit [DIR]` | Start nvim in `DIR` (default `.`) with the plugin loaded. |
 | `rex-nvim install [EXT...]` | Build `~/Applications/NvimOpen.app` and make it the default app for the supported file types (listed in `lib/types.zsh`). |
 | `rex-nvim doctor` | Check tools, that the app points to this clone, which app really opens each file type, that web links and `.html` still go to the browser, the Rex app and the registered nvim. |
@@ -65,7 +83,7 @@ click on a file link
 
 ## Known limits
 
-- Clicked links open the file, not the line: macOS hands the app a file URL without the `:line` part. `rex-nvim open FILE:LINE` from a shell does jump.
+- Clicked `file://` links open the file, not the line (see "Links that jump to the line"). Plain `path:line` text that a program prints without a hyperlink is not clickable as a link at all.
 - An nvim without the plugin loaded does not receive files.
 
 ## Tests

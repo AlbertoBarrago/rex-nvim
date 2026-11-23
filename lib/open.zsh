@@ -1,5 +1,6 @@
-# rex-nvim open FILE[:LINE[:COL]]...: open files from a hyperlink click or a
-# Finder double-click (NvimOpen.app calls this).
+# rex-nvim open FILE[:LINE[:COL]]|URL...: open files from a hyperlink click
+# or a Finder double-click (NvimOpen.app calls this). URL is a rex-nvim://
+# link (see rex_nvim_parse_url).
 #
 # Where each file goes, first match wins:
 #   1. the registered nvim whose working directory holds it (deepest wins);
@@ -21,7 +22,9 @@ REX_NVIM_SEND_TIMEOUT=3
 # wins, so a file really named "a:1" is never split.
 rex_nvim_parse_target() {
   local arg=$1
-  if [[ -e $arg ]]; then
+  if [[ $arg == rex-nvim://* ]]; then
+    rex_nvim_parse_url $arg
+  elif [[ -e $arg ]]; then
     reply=(${arg:A} 0 0)
   elif [[ $arg =~ '^(.+):([0-9]+):([0-9]+)$' && -e $match[1] ]]; then
     reply=(${match[1]:A} $match[2] $match[3])
@@ -30,6 +33,31 @@ rex_nvim_parse_target() {
   else
     reply=(${arg:A} 0 0)
   fi
+}
+
+# rex_nvim_parse_url URL: set reply=(FILE LINE COL) from
+# rex-nvim://open/PATH?line=N&column=M (PATH percent-encoded and absolute,
+# line and column optional; "col" is accepted too). This is the format
+# ripgrep (--hyperlink-format) and delta (hyperlinks-file-link-format) emit
+# with {path}, {line} and {column}, so their links carry the line.
+rex_nvim_parse_url() {
+  local rest=${1#rex-nvim://} query="" kv key value file
+  integer line=0 col=0
+  rest=${rest#open}
+  if [[ $rest == *\?* ]]; then
+    query=${rest#*\?}
+    rest=${rest%%\?*}
+  fi
+  printf -v file '%b' ${rest//\%/\\x}
+  for kv in ${(s:&:)query}; do
+    key=${kv%%=*} value=${kv#*=}
+    [[ $value == <-> ]] || continue
+    case $key in
+      line) line=$value ;;
+      column|col) col=$value ;;
+    esac
+  done
+  reply=(${file:A} $line $col)
 }
 
 # rex_nvim_send FILE LINE COL REG: focus the registered nvim's pane, then open

@@ -22,6 +22,17 @@ on open theItems
 	do shell script quoted form of rexNvim & " open" & args & " || true"
 end open
 
+-- rex-nvim:// links (from ripgrep, delta...) arrive here instead.
+on open location theURL
+	try
+		do shell script "test -x " & quoted form of rexNvim
+	on error
+		display notification "rex-nvim not found at " & rexNvim & ". Run rex-nvim install from the clone." with title "rex-nvim"
+		return
+	end try
+	do shell script quoted form of rexNvim & " open " & quoted form of theURL & " || true"
+end open location
+
 on run
 	display notification "Open a file with NvimOpen to edit it in nvim." with title "rex-nvim"
 end run
