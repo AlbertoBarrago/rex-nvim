@@ -287,6 +287,8 @@ rex_nvim_uti_group tsx
 check "groups follow every type of an extension" test "$reply" = "ts tsx"
 rex_nvim_uti_group swift
 check "an extension with its own type is a group of one" test "$reply" = swift
+rex_nvim_uti_group kt
+check "a type that prefixes another is not grouped with it" test "$reply" = kt
 
 rex_nvim_keep_read
 check "missing keep file keeps nothing" test -z "$reply"

@@ -16,15 +16,18 @@ REX_NVIM_KEEP_FILE=${REX_NVIM_KEEP_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/rex-n
 # content type with it, directly or through another one, sorted.
 rex_nvim_uti_group() {
   local ext other uti
-  local -a group=($1) next
+  local -a group=($1) other_utis
   integer grown=1
   while (( grown )); do
     grown=0
     for ext in $group; do
       for other in ${(k)REX_NVIM_TYPES}; do
         (( ${group[(Ie)$other]} )) && continue
+        # A real array: (Ie) on a one-word scalar would match substrings
+        # (the kt type is a prefix of the kts one).
+        other_utis=(${=REX_NVIM_TYPES[$other]})
         for uti in ${=REX_NVIM_TYPES[$ext]}; do
-          if (( ${${=REX_NVIM_TYPES[$other]}[(Ie)$uti]} )); then
+          if (( ${other_utis[(Ie)$uti]} )); then
             group+=($other)
             grown=1
             break
