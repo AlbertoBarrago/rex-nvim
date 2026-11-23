@@ -16,15 +16,17 @@ Markdown no nvim already holds opens read-only in [glow](https://github.com/char
 brew install neovim duti jq glow
 git clone https://github.com/AlbertoBarrago/rex-nvim.git ~/Projects/rex-nvim
 ~/Projects/rex-nvim/install.sh     # links rex-nvim into ~/.local/bin
-rex-nvim install                   # builds NvimOpen.app, binds file types
+rex-nvim install                   # asks which file types go to nvim, binds them
 rex-nvim doctor                    # after confirming the dialogs
 ```
 
+`rex-nvim install` lists every file type that does not open in nvim yet, with the app opening it today and a suggestion: nvim, or keep the current app when that app owns the type (Xcode for `.swift`, `.m`, `.mm`; Android Studio or IntelliJ IDEA for `.kt`, `.kts`, `.gradle`). Press Enter to accept the suggestions, `p` to pick each type, `q` to stop without changes. `rex-nvim install --yes`, or a run without a terminal, takes the suggestions without asking.
+
 macOS asks to confirm each newly bound file type (one per type that already has another default app: up to about 30 on a fresh machine, none on a rerun): confirm only the ones that name NvimOpen. `rex-nvim install EXT...` binds only the given extensions, handy to add one later.
 
-To leave a type on its current app (`.swift` on Xcode, say), list its extension in `~/.config/rex-nvim/keep`, one per line. `rex-nvim install` then skips it and `rex-nvim doctor` reports it as kept instead of failing. macOS binds content types, not extensions, so extensions sharing one (`yaml` and `yml`, `js` and `mjs`, `ts` and `tsx`) are kept together or not at all. `rex-nvim install EXT...` takes an extension, and its group, back off the list.
+The types left on their app are listed in `~/.config/rex-nvim/keep`, one extension per line, which can also be edited by hand. `rex-nvim install` skips them and `rex-nvim doctor` reports them as kept instead of failing. macOS binds content types, not extensions, so extensions sharing one (`yaml` and `yml`, `js` and `mjs`, `ts` and `tsx`) are kept together or not at all. `rex-nvim install EXT...` takes an extension, and its group, back off the list.
 
-Then load the nvim plugin, so every nvim started in a Rex pane registers itself. With lazy.nvim, add a spec (for example `lua/plugins/rex-nvim.lua`):
+Then load the nvim plugin, so every nvim started in a Rex pane registers itself. `rex-nvim install` offers to do it when the config does not load it yet: with lazy.nvim importing `lua/plugins` it writes the spec below there, without a plugin manager it links the plugin into nvim's `pack` directory. It never overwrites an existing file, and `--yes` only prints what it would do. By hand, with lazy.nvim, add a spec (for example `lua/plugins/rex-nvim.lua`):
 
 ```lua
 local dir = vim.fn.expand("~/Projects/rex-nvim/nvim")
@@ -61,7 +63,8 @@ Rex may ask before opening a link with a custom scheme (Settings, Terminal, Link
 | --- | --- |
 | `rex-nvim open FILE[:LINE[:COL]]\|URL...` | Open files (or `rex-nvim://` links) as described above. This is what NvimOpen.app runs. |
 | `rex-nvim edit [DIR]` | Start nvim in `DIR` (default `.`) with the plugin loaded. |
-| `rex-nvim install [EXT...]` | Build `~/Applications/NvimOpen.app` and make it the default app for the supported file types (listed in `lib/types.zsh`), except the ones in the keep list. |
+| `rex-nvim install [--yes]` | Build `~/Applications/NvimOpen.app`, ask which supported file types (listed in `lib/types.zsh`) go to nvim, bind them, and offer to load the plugin from the nvim config. |
+| `rex-nvim install EXT...` | Bind only these extensions to nvim, taking them off the keep list. |
 | `rex-nvim doctor` | Check tools, that the app points to this clone, which app really opens each file type (kept types included), that web links and `.html` still go to the browser, the Rex app, that the nvim config loads the plugin, and the nvim open right now. |
 
 Errors are shown as macOS notifications and logged to `~/Library/Logs/rex-nvim.log`. If the clone moves, clicks report it until `rex-nvim install` is run again from the new place.

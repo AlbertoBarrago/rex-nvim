@@ -340,5 +340,78 @@ check "missing plugin in the config fails" grep -q 'FAIL  nvim config does not l
 STUB_PLUGIN= rex_nvim_doctor > $tmp/doctor.out 2>&1
 check "nvim that does not answer only warns" grep -q 'warn  could not ask nvim' $tmp/doctor.out
 
+# --- install wizard -----------------------------------------------------------
+
+source $REX_NVIM_ROOT/lib/wizard.zsh
+# wizard.zsh sources probe.zsh again: the stubs go back on top. swift and m
+# open in Xcode, kt in Android Studio, yaml/yml in TextEdit, ts/tsx in
+# QuickTime, the rest in NvimOpen.
+default_app() {
+  case $1 in
+    *.swift|*.m) print /Applications/Xcode.app ;;
+    *.kt) print "/Applications/Android Studio.app" ;;
+    *.yaml|*.yml) print /System/Applications/TextEdit.app ;;
+    *.ts|*.tsx) print "/System/Applications/QuickTime Player.app" ;;
+    *) print $REX_NVIM_APP ;;
+  esac
+}
+plugin_loaded() { print -r -- ${STUB_PLUGIN-yes} }
+
+rex_nvim_keep_write
+rex_nvim_wizard_rows
+check "wizard rows are the groups not on nvim" test "${(j:|:)wizard_exts}" = "kt|m|swift|ts tsx|yaml yml"
+check "wizard shows the app opening each today" test "${(j:|:)wizard_now}" = "Android Studio|Xcode|Xcode|QuickTime Player|TextEdit"
+check "owning IDEs are kept, the rest goes to nvim" test "${(j:|:)wizard_suggest}" = "keep|keep|keep|nvim|nvim"
+check "groups on nvim are counted, not listed" test ${#wizard_on_nvim} -eq $(( all_types - 7 ))
+rex_nvim_wizard_table > $tmp/table.out
+check "table joins a group on one row" grep -q 'yaml, yml' $tmp/table.out
+check "table shows the ts note" grep -q 'opens .ts videos in nvim' $tmp/table.out
+
+rex_nvim_wizard_choose auto
+check "auto takes the suggestions" test "$reply" = "kt m swift"
+rex_nvim_wizard_choose ask <<< '' > /dev/null
+check "Enter accepts the suggestions" test "$reply" = "kt m swift"
+print -l p n '' k x k '' | rex_nvim_wizard_choose ask > /dev/null
+# A pipeline runs the last command in this shell in zsh, so reply is kept.
+check "picking each type overrides suggestions" test "$reply" = "m swift ts tsx"
+check "quit leaves the choice undone" test "$(rex_nvim_wizard_choose ask <<< q > /dev/null; print $?)" = 1
+check "end of input leaves the choice undone" test "$(rex_nvim_wizard_choose ask < /dev/null > /dev/null; print $?)" = 1
+
+rex_nvim_keep_write swift
+rex_nvim_wizard_rows
+check "an earlier keep stays suggested" test "${wizard_suggest[3]}" = keep
+
+# Plugin step against a scratch nvim config.
+export XDG_CONFIG_HOME=$tmp/xdg/config XDG_DATA_HOME=$tmp/xdg/data
+lazycfg=$XDG_CONFIG_HOME/nvim
+mkdir -p $lazycfg/lua/plugins
+print -r -- 'require("lazy").setup({ { import = "plugins" } })' > $lazycfg/init.lua
+spec=$lazycfg/lua/plugins/rex-nvim.lua
+
+STUB_PLUGIN=yes rex_nvim_wizard_plugin ask > $tmp/plugin.out < /dev/null
+check "loaded plugin needs no step" grep -q 'already loads' $tmp/plugin.out
+STUB_PLUGIN=no rex_nvim_wizard_plugin auto > $tmp/plugin.out
+check "auto only suggests the spec" test ! -e $spec
+check "auto names the spec file" grep -q "to load the nvim plugin: write the lazy.nvim spec $spec" $tmp/plugin.out
+STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< n > /dev/null
+check "a no leaves the config alone" test ! -e $spec
+STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > /dev/null
+check "a yes writes the lazy.nvim spec" grep -q "local dir = \[==\[$REX_NVIM_ROOT/nvim\]==\]" $spec
+check "the spec is valid Lua returning a spec" test "$($real_nvim --headless --clean -l /dev/stdin <<< "io.write(dofile([[$spec]])[1].name)" 2>&1)" = rex-nvim
+print -r -- '-- mine' > $spec
+STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > $tmp/plugin.out
+check "an existing spec is never overwritten" test "$(<$spec)" = '-- mine'
+
+rm -rf $lazycfg/lua/plugins
+STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > $tmp/plugin.out
+check "lazy without lua/plugins gets the README" grep -q 'add the spec from the README' $tmp/plugin.out
+
+mkdir -p $XDG_CONFIG_HOME/plain
+print -r -- 'vim.o.number = true' > $XDG_CONFIG_HOME/plain/init.lua
+NVIM_APPNAME=plain STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > /dev/null
+pack=$XDG_DATA_HOME/plain/site/pack/rex-nvim/start/rex-nvim
+check "a plain config gets the pack symlink" test "${pack:A}" = ${REX_NVIM_ROOT:A}/nvim
+unset XDG_CONFIG_HOME XDG_DATA_HOME
+
 print "$passes passed, $failures failed"
 (( failures == 0 ))

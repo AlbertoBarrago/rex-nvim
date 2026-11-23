@@ -4,8 +4,9 @@
 #   rex-nvim open FILE[:LINE[:COL]]...  open files in the project's nvim, or in a tab of
 #                             the Rex "files" session (glow for Markdown)
 #   rex-nvim edit [DIR]       start nvim in DIR with the rex-nvim plugin loaded
-#   rex-nvim install [EXT...] build NvimOpen.app and make it the default app for
-#                             code and text files, so file hyperlinks land in nvim
+#   rex-nvim install [--yes]  build NvimOpen.app, ask which file types go to nvim
+#                             (--yes: take the suggestions) and bind them
+#   rex-nvim install EXT...   bind only these extensions to nvim
 #   rex-nvim doctor           check tools, the app, file type bindings, the
 #                             browser and registered nvim
 #
@@ -21,7 +22,7 @@ source $REX_NVIM_ROOT/lib/registry.zsh
 source $REX_NVIM_ROOT/lib/rex.zsh
 
 usage() {
-  print -r -- "usage: rex-nvim open FILE[:LINE[:COL]]... | edit [DIR] | install [EXT...] | doctor"
+  print -r -- "usage: rex-nvim open FILE[:LINE[:COL]]... | edit [DIR] | install [--yes | EXT...] | doctor"
 }
 
 case ${1:-} in
@@ -37,8 +38,16 @@ case ${1:-} in
     ;;
   install)
     shift
-    source $REX_NVIM_ROOT/lib/install.zsh
-    rex_nvim_install "$@"
+    if (( $# == 0 )) || [[ $* == --yes ]]; then
+      source $REX_NVIM_ROOT/lib/wizard.zsh
+      rex_nvim_wizard "$@"
+    elif [[ $1 == -* ]]; then
+      usage >&2
+      exit 64
+    else
+      source $REX_NVIM_ROOT/lib/install.zsh
+      rex_nvim_install "$@"
+    fi
     ;;
   doctor)
     source $REX_NVIM_ROOT/lib/doctor.zsh
