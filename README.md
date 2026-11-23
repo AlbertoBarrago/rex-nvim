@@ -2,8 +2,13 @@
 
 nvim integration for the [Rex](https://www.superlogical.com/rex) terminal on macOS: clicking a file hyperlink (or double-clicking a code file in Finder) opens it in nvim inside Rex instead of a GUI editor.
 
-- A file inside the working directory of an nvim running in a Rex pane loads in that nvim, and Rex focuses its pane.
-- Any other file opens as a new tab of the Rex session `files`, created on first use: in nvim, or in [glow](https://github.com/charmbracelet/glow) for Markdown (read-only, `q` closes it). The tab closes when the program exits.
+Where a file goes, first match wins:
+
+1. The nvim running in a Rex pane whose working directory holds the file: it loads there and Rex focuses its pane.
+2. The Rex session that has a terminal sitting in the file's project (the deepest terminal working directory above the file): a new nvim tab opens there, in that directory, so it takes the next files of that project too.
+3. The Rex session `files`, created on first use: the nvim already running there receives the file, else a new nvim tab opens.
+
+Markdown no nvim already holds opens read-only in [glow](https://github.com/charmbracelet/glow) instead (`q` closes it). Rex.app is launched if needed and switched to the session the file landed in.
 
 ## Install
 
@@ -44,14 +49,15 @@ Without a plugin manager, `vim.opt.rtp:append(vim.fn.expand("~/Projects/rex-nvim
 click on a file link
   -> macOS LaunchServices -> NvimOpen.app (default app for the file type)
   -> rex-nvim open FILE
-       registered nvim whose working directory holds FILE?
-         yes -> rex focus its pane, then open FILE through the plugin (3 s timeout)
-         no, or nvim busy -> new tab in Rex session "files"
+       1. registered nvim whose cwd holds FILE -> rex focus its pane, open FILE through the plugin (3 s timeout)
+       2. session with a terminal in FILE's project -> new nvim tab there
+       3. session "files" -> its nvim, else a new nvim tab
+     then Rex.app shows that session (session.select)
 ```
 
 - **Registry.** The plugin (`nvim/`) runs in every nvim with `$REX_BLOCK` set, that is inside a Rex pane. It writes `~/.cache/rex-nvim/<pid>.reg` with the physical working directory, the Rex session and block, and nvim's RPC address; it refreshes it on `:cd` and when the pane gains focus, and removes it on exit. `open` drops registrations whose process is gone. The deepest matching directory wins; among nvim on the same one, the most recently focused.
-- **Opening.** `open` calls the plugin's `open()` over RPC rather than `--remote`: it picks a regular window (never a `winfixbuf` sidebar, a floating or special window), leaves insert mode, does not stop on an existing swap file, and moves the cursor to `LINE:COL`. A busy nvim (for example running `:!npm test`) answers only when done, so after 3 seconds the file opens in a tab instead.
-- **Why a fixed `files` session.** The Rex server does not know which session the app is showing, and `rex run` refuses to guess when several exist. A dedicated session keeps the target predictable.
+- **Opening.** `open` calls the plugin's `open()` over RPC rather than `--remote`: it picks a regular window (never a `winfixbuf` sidebar, a floating or special window), leaves insert mode, does not stop on an existing swap file, and moves the cursor to `LINE:COL`. A busy nvim (for example running `:!npm test`) answers only when done, so after 3 seconds the file goes to the next target instead.
+- **Choosing a session.** The Rex server does not know which session the app is showing, and `rex run` refuses to guess when several exist. So the target comes from the file itself: each terminal reports its working directory, and the deepest one above the file wins (shells sitting in `$HOME` or above are ignored). The `files` session catches the rest. The app is then asked to show that session (`session.select`).
 - **File types.** NvimOpen binds exact content types (UTIs), never generic ones such as `public.data`: declaring those makes macOS offer the app for every file. `html` is left out on purpose, since binding `public.html` makes the app the default web browser. `.plist` stays with Xcode (macOS types binary plists the same way). macOS types `.ts` as MPEG-2 video first, so that video type is bound too and `.ts` videos open in nvim. Extensions macOS has no type for (`.jsx`, `.lua`, `.rs`, `.go`, `.kt`) get a type declared by NvimOpen.
 
 ## Known limits

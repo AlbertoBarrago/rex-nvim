@@ -25,21 +25,42 @@ trap cleanup EXIT
 
 stubs=$tmp/stubs
 mkdir -p $stubs
+# The rex stub answers from fixtures in $STUB_FIX: sessions.json (rex ls),
+# blocks-<session>.json (rex block ls), pwd-<block>.json (block call pwd);
+# $STUB_APP, when set, is the connected app client.
 cat > $stubs/rex <<'EOF'
 #!/bin/zsh
 print -r -- "rex ${(j: :)${(q)@}}" >> $STUB_LOG
-if [[ $1 == ls ]]; then print -r -- ${STUB_SESSIONS:-'{"sessions":[]}'}; fi
+fix() { [[ -r $STUB_FIX/$1 ]] && cat $STUB_FIX/$1 || print -r -- $2 }
+case "$1 $2" in
+  "ls "*) fix sessions.json '{"sessions":[]}' ;;
+  "client ls")
+    if [[ -n ${STUB_APP:-} ]]; then
+      print -r -- "{\"clients\":[{\"client_id\":\"$STUB_APP\",\"info\":{\"kind\":\"app\"},\"connection_state\":\"connected\"}]}"
+    else
+      print -r -- '{"clients":[]}'
+    fi ;;
+  "block ls") fix blocks-$4.json '{"blocks":[]}' ;;
+  "block call") fix pwd-$6.json '{}' ;;
+esac
 EOF
 cat > $stubs/glow <<'EOF'
 #!/bin/zsh
 print -r -- "glow $*" >> $STUB_LOG
 EOF
+# `open -b` would bring the real Rex app to the front.
+cat > $stubs/open <<'EOF'
+#!/bin/zsh
+print -r -- "open $*" >> $STUB_LOG
+EOF
 chmod +x $stubs/*
-export PATH=$stubs:$PATH STUB_LOG=$tmp/stub.log
+export PATH=$stubs:$PATH STUB_LOG=$tmp/stub.log STUB_FIX=$tmp/fix STUB_APP=client:app
 export REX_NVIM_STATE_DIR=$tmp/state
+mkdir -p $STUB_FIX
 
 source $REX_NVIM_ROOT/lib/common.zsh
 source $REX_NVIM_ROOT/lib/registry.zsh
+source $REX_NVIM_ROOT/lib/rex.zsh
 source $REX_NVIM_ROOT/lib/open.zsh
 source $REX_NVIM_ROOT/lib/edit.zsh
 # common.zsh appends fallbacks to PATH; the stubs must stay first.
@@ -167,8 +188,49 @@ rex_nvim_open $loose/Main.java:3
 check "FILE:LINE in a new tab starts nvim on the line" grep -q -- "-- nvim +3 -- $loose/Main.java" $STUB_LOG
 
 : > $STUB_LOG
-STUB_SESSIONS='{"sessions":[{"session_id":"session:f1","label":"files"}]}' rex_nvim_open $loose/Main.java
+print -r -- '{"sessions":[{"session_id":"session:f1","label":"files"}]}' > $STUB_FIX/sessions.json
+rex_nvim_open $loose/Main.java
 check "existing files session is reused" grep -q -- "rex run -s session:f1 .*-- nvim -- $loose/Main.java" $STUB_LOG
+check "the app is shown the target session" grep -q -- "rex do -C client:app session.select session_id=session:f1" $STUB_LOG
+
+# One nvim serves the files session: further unclaimed files go to it.
+filesdir=$tmp/filesdir
+mkdir -p $filesdir
+serve $filesdir session:f1 && pid_files=$REPLY
+: > $STUB_LOG
+rex_nvim_open $loose/Main.java
+check "files session nvim receives unclaimed files" test "$(ask $pid_files 'expand("%:p")')" = $loose/Main.java
+check "files session nvim means no new tab" test -z "$(grep 'rex \(new\|run\)' $STUB_LOG)"
+: > $STUB_LOG
+rex_nvim_open $loose/notes.md
+check "markdown still opens in glow beside the files nvim" grep -q -- "rex run -s session:f1 .*-- glow -p $loose/notes.md" $STUB_LOG
+
+# A terminal sitting in the file's project claims it: new nvim tab there.
+proj2=$tmp/proj2
+mkdir -p $proj2/src
+: > $proj2/src/util.py
+print -r -- '{"sessions":[{"session_id":"session:f1","label":"files"},{"session_id":"session:p2","label":"P2"},{"session_id":"session:hm","label":"home"}]}' > $STUB_FIX/sessions.json
+print -r -- '{"blocks":[{"block_id":"block:p2a","flavor":"com.superlogical.terminal.shell"}]}' > $STUB_FIX/blocks-session:p2.json
+print -r -- '{"blocks":[{"block_id":"block:hm","flavor":"com.superlogical.terminal.shell"}]}' > $STUB_FIX/blocks-session:hm.json
+print -r -- "{\"pwd\":\"file://somehost${proj2// /%20}\"}" > $STUB_FIX/pwd-block:p2a.json
+print -r -- "{\"pwd\":\"file://somehost$HOME\"}" > $STUB_FIX/pwd-block:hm.json
+: > $STUB_LOG
+rex_nvim_open $proj2/src/util.py
+check "terminal cwd claims the file for its session" grep -q -- "rex run -s session:p2 -c $proj2 --label util.py -- nvim -- $proj2/src/util.py" $STUB_LOG
+# A shell sitting in HOME would be an ancestor of every file under it.
+mkdir -p $tmp/other
+: > $tmp/other/x.py
+print -r -- "{\"pwd\":\"file://somehost$tmp\"}" > $STUB_FIX/pwd-block:hm.json
+: > $STUB_LOG
+HOME=$tmp rex_nvim_open $tmp/other/x.py
+check "a shell in HOME does not claim files" test -z "$(grep 'session:hm -c' $STUB_LOG)"
+
+# No Rex app connected: it is launched, and the user told if it never shows.
+: > $STUB_LOG
+: > $tmp/notify.log
+STUB_APP= rex_nvim_open $loose/Main.java
+check "missing Rex app is launched" grep -q -- "open -g -b com.superlogical.rex" $STUB_LOG
+check "missing Rex app is reported" grep -q 'not running' $tmp/notify.log
 
 : > $loose/odd:7
 rex_nvim_parse_target $loose/odd:7

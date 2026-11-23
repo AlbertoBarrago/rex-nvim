@@ -16,6 +16,7 @@ setopt null_glob pipe_fail
 REX_NVIM_ROOT=${0:A:h:h}
 source $REX_NVIM_ROOT/lib/common.zsh
 source $REX_NVIM_ROOT/lib/registry.zsh
+source $REX_NVIM_ROOT/lib/rex.zsh
 
 usage() {
   print -r -- "usage: rex-nvim open FILE[:LINE[:COL]]... | edit [DIR] | install [EXT...]"
