@@ -20,11 +20,17 @@ REX_NVIM_STATE=${REX_NVIM_STATE_DIR:-$HOME/.cache/rex-nvim}
 # the target predictable.
 REX_NVIM_FILES_SESSION=files
 
-# notify MESSAGE: report an error on stderr and as a macOS notification, since
-# NvimOpen.app has no terminal. The text is passed as an argument, never
+# Errors are also logged: notifications can be disabled or missed, and
+# NvimOpen.app has no terminal to show them in.
+REX_NVIM_LOG=${REX_NVIM_LOG:-$HOME/Library/Logs/rex-nvim.log}
+
+# notify MESSAGE: report an error on stderr, in the log and as a macOS
+# notification. The text is passed to osascript as an argument, never
 # spliced into AppleScript source.
 notify() {
   print -r -- "rex-nvim: $1" >&2
+  mkdir -p ${REX_NVIM_LOG:h} 2>/dev/null
+  print -r -- "$(date '+%Y-%m-%d %H:%M:%S') $1" >> $REX_NVIM_LOG 2>/dev/null
   osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "rex-nvim"' -e 'end run' -- "$1" >/dev/null 2>&1
 }
 

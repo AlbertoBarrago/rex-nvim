@@ -6,6 +6,8 @@
 #   rex-nvim edit [DIR]       start nvim in DIR with the rex-nvim plugin loaded
 #   rex-nvim install [EXT...] build NvimOpen.app and make it the default app for
 #                             code and text files, so file hyperlinks land in nvim
+#   rex-nvim doctor           check tools, the app, file type bindings, the
+#                             browser and registered nvim
 #
 # The script resolves its own path through the ~/.local/bin symlink, so the
 # libraries are read from this clone and `git pull` updates everything.
@@ -19,7 +21,7 @@ source $REX_NVIM_ROOT/lib/registry.zsh
 source $REX_NVIM_ROOT/lib/rex.zsh
 
 usage() {
-  print -r -- "usage: rex-nvim open FILE[:LINE[:COL]]... | edit [DIR] | install [EXT...]"
+  print -r -- "usage: rex-nvim open FILE[:LINE[:COL]]... | edit [DIR] | install [EXT...] | doctor"
 }
 
 case ${1:-} in
@@ -37,6 +39,10 @@ case ${1:-} in
     shift
     source $REX_NVIM_ROOT/lib/install.zsh
     rex_nvim_install "$@"
+    ;;
+  doctor)
+    source $REX_NVIM_ROOT/lib/doctor.zsh
+    rex_nvim_doctor
     ;;
   -h|--help|help)
     usage

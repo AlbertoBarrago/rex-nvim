@@ -17,7 +17,7 @@ brew install neovim duti jq glow
 git clone https://github.com/AlbertoBarrago/rex-nvim.git ~/Projects/rex-nvim
 ~/Projects/rex-nvim/install.sh     # links rex-nvim into ~/.local/bin
 rex-nvim install                   # builds NvimOpen.app, binds file types
-duti -x html                       # must still be your browser
+rex-nvim doctor                    # after confirming the dialogs
 ```
 
 macOS asks to confirm each newly bound file type (about 30 dialogs on a fresh machine, none on a rerun): confirm only the ones that name NvimOpen. `rex-nvim install EXT...` binds only the given extensions, handy to add one later.
@@ -41,7 +41,10 @@ Without a plugin manager, `vim.opt.rtp:append(vim.fn.expand("~/Projects/rex-nvim
 | --- | --- |
 | `rex-nvim open FILE[:LINE[:COL]]...` | Open files as described above. This is what NvimOpen.app runs. |
 | `rex-nvim edit [DIR]` | Start nvim in `DIR` (default `.`) with the plugin loaded. |
-| `rex-nvim install [EXT...]` | Build `~/Applications/NvimOpen.app` and make it the default app for the supported file types. |
+| `rex-nvim install [EXT...]` | Build `~/Applications/NvimOpen.app` and make it the default app for the supported file types (listed in `lib/types.zsh`). |
+| `rex-nvim doctor` | Check tools, that the app points to this clone, which app really opens each file type, that web links and `.html` still go to the browser, the Rex app and the registered nvim. |
+
+Errors are shown as macOS notifications and logged to `~/Library/Logs/rex-nvim.log`. If the clone moves, clicks report it until `rex-nvim install` is run again from the new place.
 
 ## How it works
 

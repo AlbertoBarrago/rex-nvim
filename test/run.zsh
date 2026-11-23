@@ -251,5 +251,22 @@ chmod +x $nvim_stub/nvim
 check "edit starts nvim in the directory" grep -qx -- "cwd $parent" $STUB_LOG
 check "edit loads the plugin from this clone" grep -q -- "rtp:append(\[==\[$REX_NVIM_ROOT/nvim\]==\])" $STUB_LOG
 
+# --- file type table (lib/types.zsh) ---------------------------------------
+
+source $REX_NVIM_ROOT/lib/types.zsh
+typeset -a own_types missing_imports generic
+for ext uti in ${(kv)REX_NVIM_TYPES}; do
+  for uti in ${=uti}; do
+    [[ $uti == $REX_NVIM_BUNDLE_ID.* ]] && own_types+=(${uti#$REX_NVIM_BUNDLE_ID.})
+    [[ $uti == (public.data|public.text|public.item|public.content|public.html|public.url) ]] && generic+=($uti)
+  done
+done
+for ext in $own_types; do
+  (( ${REX_NVIM_IMPORTED[(Ie)$ext]} )) || missing_imports+=($ext)
+done
+check "every NvimOpen-owned type is imported" test -z "${missing_imports[*]}"
+check "no generic or browser types are bound" test -z "${generic[*]}"
+check "html is never bound" test -z "${REX_NVIM_TYPES[html]:-}${REX_NVIM_TYPES[htm]:-}"
+
 print "$passes passed, $failures failed"
 (( failures == 0 ))

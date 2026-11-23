@@ -13,6 +13,7 @@ zsh test/run.zsh                       # full suite (plugin, registry, open, edi
 for f in bin/rex-nvim lib/*.zsh test/run.zsh; do zsh -n $f; done; sh -n install.sh   # syntax
 ./install.sh                           # link bin/rex-nvim into ~/.local/bin
 rex-nvim install [EXT...]              # rebuild NvimOpen.app and bind file types
+rex-nvim doctor                        # real default app per type, browser, registry
 ```
 
 There is no single-test runner: `test/run.zsh` is one script of `check NAME COMMAND...` calls. To focus, comment out sections or run it and grep its `FAIL:` lines.
@@ -33,7 +34,7 @@ Both sides must compare physical paths (symlinks resolved), and both must agree 
 - The Rex server cannot tell which session the app is showing (the app is attached to all of them), and `rex run` without `-s` fails with "session target default is ambiguous" when several sessions exist. Hence targets derived from the file (terminal cwds) and the `files` session. The app client action `session.select session_id=...` does switch the app's view.
 - `client.tab.new` performed from outside the app creates a **new session** per call and leaves empty sessions behind. `client.perform` cannot run `init.lua` actions on the app ("does not offer"), so a Lua action cannot learn the app's current session either.
 
-## LaunchServices rules (lib/install.zsh)
+## LaunchServices rules (lib/types.zsh, lib/install.zsh)
 
 These come from real incidents; keep them:
 
@@ -44,7 +45,8 @@ These come from real incidents; keep them:
 - `.ts` is typed `public.mpeg-2-transport-stream` first; that video type is bound on purpose.
 - Keep `REX_NVIM_BUNDLE_ID` (`it.albz.nvimopen`): changing it orphans every existing binding and re-triggers all dialogs.
 - The app is built in a scratch dir and swapped in only when complete, because bound types would otherwise point at a missing app.
-- Verify bindings with what actually opens, not with `duti`'s exit status (a pending dialog reports success): `osascript -l JavaScript -e "ObjC.import('AppKit'); \$.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL(\$.NSURL.fileURLWithPath('/path/x.ext')).path.js"`.
+- Verify bindings with what actually opens, not with `duti`'s exit status (a pending dialog reports success): `rex-nvim doctor` does it per type (`default_app` in lib/doctor.zsh, NSWorkspace via JXA). The type-table tests in `test/run.zsh` guard the imported and forbidden types.
+- The applet reads the CLI path from a compiled-in property (also stored as `RexNvimBin` in Info.plist for `doctor`); it checks the path first and pipes `rex-nvim open` through `|| true`, because the CLI already notifies and logs its own failures.
 
 ## Testing against the real app
 
