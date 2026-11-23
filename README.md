@@ -20,7 +20,7 @@ rex-nvim install                   # builds NvimOpen.app, binds file types
 rex-nvim doctor                    # after confirming the dialogs
 ```
 
-macOS asks to confirm each newly bound file type (about 30 dialogs on a fresh machine, none on a rerun): confirm only the ones that name NvimOpen. `rex-nvim install EXT...` binds only the given extensions, handy to add one later.
+macOS asks to confirm each newly bound file type (one per type that already has another default app: up to about 30 on a fresh machine, none on a rerun): confirm only the ones that name NvimOpen. `rex-nvim install EXT...` binds only the given extensions, handy to add one later.
 
 Then load the nvim plugin, so every nvim started in a Rex pane registers itself. With lazy.nvim, add a spec (for example `lua/plugins/rex-nvim.lua`):
 

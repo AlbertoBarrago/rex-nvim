@@ -17,6 +17,9 @@ typeset -gA REX_NVIM_TYPES=(
   ts    "com.microsoft.typescript public.mpeg-2-transport-stream"
   tsx   com.microsoft.typescript
   js    com.netscape.javascript-source
+  mjs   com.netscape.javascript-source
+  cjs   $REX_NVIM_BUNDLE_ID.cjs
+  cts   $REX_NVIM_BUNDLE_ID.cts
   jsx   $REX_NVIM_BUNDLE_ID.jsx
   json  public.json
   md    net.daringfireball.markdown
@@ -31,15 +34,21 @@ typeset -gA REX_NVIM_TYPES=(
   yaml  public.yaml
   yml   public.yaml
   css   public.css
+  scss  $REX_NVIM_BUNDLE_ID.scss
   txt   public.plain-text
   xml   public.xml
   sql   org.iso.sql
   java  com.sun.java-source
   kt    $REX_NVIM_BUNDLE_ID.kt
+  kts   $REX_NVIM_BUNDLE_ID.kts
+  gradle $REX_NVIM_BUNDLE_ID.gradle
+  properties $REX_NVIM_BUNDLE_ID.properties
   c     public.c-source
   cpp   public.c-plus-plus-source
   h     public.c-header
+  hpp   public.c-plus-plus-header
   m     public.objective-c-source
+  mm    public.objective-c-plus-plus-source
   rb    public.ruby-script
   php   public.php-script
   # .plist stays out on purpose: macOS types every .plist as the generic
@@ -49,4 +58,4 @@ typeset -gA REX_NVIM_TYPES=(
 # Extensions macOS has no type for. LaunchServices refuses a default handler
 # for the dynamic type it makes up, so NvimOpen imports one for each (an app
 # exporting a real type for the extension takes precedence over the import).
-REX_NVIM_IMPORTED=(jsx lua rs go kt)
+REX_NVIM_IMPORTED=(jsx cjs cts lua rs go kt kts gradle properties scss)
