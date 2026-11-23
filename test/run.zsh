@@ -276,5 +276,67 @@ check "every NvimOpen-owned type is imported" test -z "${missing_imports[*]}"
 check "no generic or browser types are bound" test -z "${generic[*]}"
 check "html is never bound" test -z "${REX_NVIM_TYPES[html]:-}${REX_NVIM_TYPES[htm]:-}"
 
+# --- keep list (lib/config.zsh) ----------------------------------------------
+
+export REX_NVIM_KEEP_FILE=$tmp/config/rex-nvim/keep
+source $REX_NVIM_ROOT/lib/config.zsh
+
+rex_nvim_uti_group yml
+check "extensions sharing a type form one group" test "$reply" = "yaml yml"
+rex_nvim_uti_group tsx
+check "groups follow every type of an extension" test "$reply" = "ts tsx"
+rex_nvim_uti_group swift
+check "an extension with its own type is a group of one" test "$reply" = swift
+
+rex_nvim_keep_read
+check "missing keep file keeps nothing" test -z "$reply"
+
+rex_nvim_keep_write swift m swift
+check "keep file is written with its directory" test -r $REX_NVIM_KEEP_FILE
+rex_nvim_keep_read
+check "keep file round-trips, sorted and unique" test "$reply" = "m swift"
+
+print -l '# comment' '' '.swift  # Xcode' 'nope' 'yml' 'js mjs' > $REX_NVIM_KEEP_FILE
+rex_nvim_keep_read 2> $tmp/keep.err
+check "comments, dots and several per line are read" test "$reply" = "js mjs swift"
+check "unknown extension is reported" grep -q 'unknown extension: nope' $tmp/keep.err
+check "half a type group is reported and not kept" grep -q 'yml shares its file type with yaml' $tmp/keep.err
+
+rex_nvim_keep_write
+rex_nvim_keep_read
+check "writing no extension empties the list" test -z "$reply"
+
+# --- doctor -------------------------------------------------------------------
+
+source $REX_NVIM_ROOT/lib/doctor.zsh
+# Stubs over the system queries: swift and m open in Xcode, the rest in
+# NvimOpen; the nvim config loads the plugin unless STUB_PLUGIN says
+# otherwise (empty: nvim did not answer).
+default_app() {
+  case $1 in
+    *.swift|*.m) print /Applications/Xcode.app ;;
+    *://*|*.html) print /Applications/Safari.app ;;
+    *) print $REX_NVIM_APP ;;
+  esac
+}
+plugin_loaded() { print -r -- ${STUB_PLUGIN-yes} }
+integer all_types=${#REX_NVIM_TYPES}
+
+rex_nvim_keep_write
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor fails on types open elsewhere" grep -q "FAIL  2 of $all_types types open elsewhere: m -> Xcode, swift -> Xcode" $tmp/doctor.out
+
+rex_nvim_keep_write swift m
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "kept types do not fail" test -z "$(grep 'types open elsewhere' $tmp/doctor.out)"
+check "kept types are listed as a choice" grep -q 'ok    kept on purpose: m -> Xcode, swift -> Xcode' $tmp/doctor.out
+check "kept types leave the bound count" grep -q "all $(( all_types - 2 )) types open with NvimOpen" $tmp/doctor.out
+check "loaded plugin is reported" grep -q 'ok    nvim config loads the rex-nvim plugin' $tmp/doctor.out
+
+STUB_PLUGIN=no rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "missing plugin in the config fails" grep -q 'FAIL  nvim config does not load' $tmp/doctor.out
+STUB_PLUGIN= rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "nvim that does not answer only warns" grep -q 'warn  could not ask nvim' $tmp/doctor.out
+
 print "$passes passed, $failures failed"
 (( failures == 0 ))

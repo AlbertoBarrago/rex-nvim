@@ -1,13 +1,15 @@
 # rex-nvim install [EXT...]: build ~/Applications/NvimOpen.app and make it the
 # default app for the file types in lib/types.zsh, so file hyperlinks and Finder
-# double-clicks open in nvim inside Rex. With EXT arguments, only those
-# extensions are bound.
+# double-clicks open in nvim inside Rex. Types in the keep list
+# (lib/config.zsh) are left on their app. With EXT arguments, only those
+# extensions are bound, and they leave the keep list.
 #
 # macOS asks the user to confirm every default-handler change (one dialog per
 # type), so only types not already on NvimOpen are bound: a rerun asks only
 # for what is missing. Requires duti (brew install duti).
 
 source $REX_NVIM_ROOT/lib/types.zsh
+source $REX_NVIM_ROOT/lib/config.zsh
 
 # rex_nvim_build_app DEST: compile and configure NvimOpen.app at DEST.
 rex_nvim_build_app() {
@@ -60,13 +62,26 @@ rex_nvim_build_app() {
 
 rex_nvim_install() {
   local ext uti build
-  local -a selected requested already failed
+  local -a selected requested already failed kept unkept
 
   command -v duti >/dev/null || { print -u2 "rex-nvim: duti not found, run: brew install duti"; return 69 }
-  selected=(${@:-${(k)REX_NVIM_TYPES}})
-  for ext in $selected; do
+  for ext in $@; do
     (( ${+REX_NVIM_TYPES[$ext]} )) || { print -u2 "rex-nvim: unknown extension: $ext"; return 64 }
   done
+  rex_nvim_keep_read
+  kept=($reply)
+  if (( $# )); then
+    # Binding one extension binds its whole type group, so the group leaves
+    # the keep list together.
+    selected=($@)
+    for ext in $selected; do
+      rex_nvim_uti_group $ext
+      unkept+=($reply)
+    done
+  else
+    selected=(${${(k)REX_NVIM_TYPES}:|kept})
+    (( ${#kept} )) && print "keeping on their current app: ${(j:, :)kept} (listed in $REX_NVIM_KEEP_FILE)"
+  fi
 
   # Build into a scratch dir and swap only once the app is complete:
   # LaunchServices keeps NvimOpen as default handler, so a half-built or
@@ -103,6 +118,11 @@ rex_nvim_install() {
       fi
     done
   done
+  # Updated only once the bindings are requested: a failed build above
+  # leaves the keep list as it was.
+  if (( ${#${kept:*unkept}} )); then
+    rex_nvim_keep_write ${kept:|unkept} || { print -u2 "rex-nvim: could not update $REX_NVIM_KEEP_FILE"; return 1 }
+  fi
   # duti succeeds as soon as the change is requested: macOS applies it only
   # once the user confirms the dialog, so "requested" is all that is known.
   print "NvimOpen at $REX_NVIM_APP: ${#requested} requested, ${#already} already set"
