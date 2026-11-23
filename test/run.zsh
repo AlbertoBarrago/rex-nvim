@@ -276,5 +276,263 @@ check "every NvimOpen-owned type is imported" test -z "${missing_imports[*]}"
 check "no generic or browser types are bound" test -z "${generic[*]}"
 check "html is never bound" test -z "${REX_NVIM_TYPES[html]:-}${REX_NVIM_TYPES[htm]:-}"
 
+# --- keep list (lib/config.zsh) ----------------------------------------------
+
+export REX_NVIM_KEEP_FILE=$tmp/config/rex-nvim/keep
+source $REX_NVIM_ROOT/lib/config.zsh
+
+rex_nvim_uti_group yml
+check "extensions sharing a type form one group" test "$reply" = "yaml yml"
+rex_nvim_uti_group tsx
+check "groups follow every type of an extension" test "$reply" = "ts tsx"
+rex_nvim_uti_group swift
+check "an extension with its own type is a group of one" test "$reply" = swift
+rex_nvim_uti_group kt
+check "a type that prefixes another is not grouped with it" test "$reply" = kt
+
+rex_nvim_keep_read
+check "missing keep file keeps nothing" test -z "$reply"
+
+rex_nvim_keep_write swift m swift
+check "keep file is written with its directory" test -r $REX_NVIM_KEEP_FILE
+rex_nvim_keep_read
+check "keep file round-trips, sorted and unique" test "$reply" = "m swift"
+
+print -l '# comment' '' '.swift  # Xcode' 'nope' 'yml' 'js mjs' > $REX_NVIM_KEEP_FILE
+rex_nvim_keep_read 2> $tmp/keep.err
+check "comments, dots and several per line are read" test "$reply" = "js mjs swift"
+check "unknown extension is reported" grep -q 'unknown extension: nope' $tmp/keep.err
+check "half a type group is reported and not kept" grep -q 'yml shares its file type with yaml' $tmp/keep.err
+
+rex_nvim_keep_write
+rex_nvim_keep_read
+check "writing no extension empties the list" test -z "$reply"
+
+# --- doctor -------------------------------------------------------------------
+
+# duti stub: -d answers from $STUB_DUTI_SET (types already on NvimOpen),
+# -s fails for types in $STUB_DUTI_FAIL and logs the others.
+export STUB_DUTI_SET=$tmp/duti.set STUB_DUTI_FAIL=$tmp/duti.fail STUB_DUTI_LOG=$tmp/duti.log
+: > $STUB_DUTI_SET; : > $STUB_DUTI_FAIL
+cat > $stubs/duti <<'EOF'
+#!/bin/zsh
+case $1 in
+  -d) grep -qx -- $2 $STUB_DUTI_SET && print -r -- it.albz.nvimopen ;;
+  -s) grep -qx -- $3 $STUB_DUTI_FAIL && exit 1; print -r -- $3 >> $STUB_DUTI_LOG ;;
+esac
+exit 0
+EOF
+chmod +x $stubs/duti
+# zsh caches command paths: without a rehash the real duti found earlier
+# would keep answering, and could change the user's bindings.
+rehash
+check "duti is the stub" test "$(whence -p duti)" = $stubs/duti
+(( failures )) && { print -u2 "duti stub not in effect: stopping before any install test"; exit 1 }
+
+# fake_app: point REX_NVIM_APP at a scratch app calling this clone, so the
+# doctor's app check passes without the real one (types.zsh resets it on
+# every source).
+fake_app() {
+  REX_NVIM_APP=$tmp/NvimOpen.app
+  mkdir -p $REX_NVIM_APP/Contents
+  [[ -e $REX_NVIM_APP/Contents/Info.plist ]] || {
+    plutil -create xml1 $REX_NVIM_APP/Contents/Info.plist
+    plutil -insert RexNvimBin -string $REX_NVIM_ROOT/bin/rex-nvim $REX_NVIM_APP/Contents/Info.plist
+  }
+}
+
+source $REX_NVIM_ROOT/lib/doctor.zsh
+fake_app
+# Stubs over the system queries: swift and m open in Xcode, the rest in
+# NvimOpen; the nvim config loads the plugin unless STUB_PLUGIN says
+# otherwise (empty: nvim did not answer).
+default_app() {
+  case $1 in
+    *.swift|*.m) print /Applications/Xcode.app ;;
+    *://*|*.html) print /Applications/Safari.app ;;
+    *) print $REX_NVIM_APP ;;
+  esac
+}
+plugin_loaded() { print -r -- ${STUB_PLUGIN-yes} }
+integer all_types=${#REX_NVIM_TYPES}
+
+rex_nvim_keep_write
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor exits 1 on types open elsewhere" test $? -eq 1
+check "doctor fails on types open elsewhere" grep -q "FAIL  2 of $all_types types open elsewhere: m -> Xcode, swift -> Xcode" $tmp/doctor.out
+
+rex_nvim_keep_write swift m
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor exits 0 once they are kept (counter reset per run)" test $? -eq 0
+check "kept types do not fail" test -z "$(grep 'types open elsewhere' $tmp/doctor.out)"
+check "kept types are listed as a choice" grep -q 'ok    kept on purpose: m -> Xcode, swift -> Xcode' $tmp/doctor.out
+check "kept types leave the bound count" grep -q "all $(( all_types - 2 )) types open with NvimOpen" $tmp/doctor.out
+check "loaded plugin is reported" grep -q 'ok    nvim config loads the rex-nvim plugin' $tmp/doctor.out
+
+STUB_PLUGIN=no rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "missing plugin in the config fails" grep -q 'FAIL  nvim config does not load' $tmp/doctor.out
+STUB_PLUGIN= rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor exits 0 when nvim does not answer" test $? -eq 0
+check "nvim that does not answer only warns" grep -q 'warn  could not ask nvim' $tmp/doctor.out
+
+# The real probe, against scratch configs: a plugin flagged after VimEnter
+# (as lazy.nvim's VeryLazy loads) counts, and the ShaDa file is not touched.
+probecfg=$tmp/probe-xdg
+mkdir -p $probecfg/config/late $probecfg/config/bare
+print -r -- 'vim.api.nvim_create_autocmd("VimEnter", { callback = function() vim.schedule(function() vim.g.loaded_rex_nvim = true end) end })' > $probecfg/config/late/init.lua
+: > $probecfg/config/bare/init.lua
+real_probe() { ( source $REX_NVIM_ROOT/lib/probe.zsh; XDG_CONFIG_HOME=$probecfg/config XDG_STATE_HOME=$probecfg/state NVIM_APPNAME=$1 plugin_loaded ) }
+check "probe sees a plugin loaded after VimEnter" test "$(real_probe late)" = yes
+check "probe reports a config without the plugin" test "$(real_probe bare)" = no
+check "probe leaves no ShaDa behind" test -z "$(print -l $probecfg/state/**/*.shada(N))"
+
+# --- install wizard -----------------------------------------------------------
+
+source $REX_NVIM_ROOT/lib/wizard.zsh
+fake_app
+# wizard.zsh sources probe.zsh and install.zsh again: the stubs go back on
+# top. swift and m open in Xcode, kt in Android Studio, yaml/yml in
+# TextEdit, ts/tsx in QuickTime (with STUB_MIXED, .ts in NvimOpen through
+# the video type), the rest in NvimOpen. The app build is skipped, and
+# fails with STUB_BUILD_FAIL.
+default_app() {
+  case $1 in
+    *.swift|*.m) print /Applications/Xcode.app ;;
+    *.kt) print "/Applications/Android Studio.app" ;;
+    *.yaml|*.yml) print /System/Applications/TextEdit.app ;;
+    *.ts) [[ -n ${STUB_MIXED-} ]] && print $REX_NVIM_APP || print "/System/Applications/QuickTime Player.app" ;;
+    *.tsx) print "/System/Applications/QuickTime Player.app" ;;
+    *) print $REX_NVIM_APP ;;
+  esac
+}
+plugin_loaded() { print -r -- ${STUB_PLUGIN-yes} }
+rex_nvim_install_app() { [[ -z ${STUB_BUILD_FAIL-} ]] }
+
+rex_nvim_keep_write
+rex_nvim_wizard_rows
+check "wizard rows are the groups not on nvim" test "${(j:|:)wizard_exts}" = "kt|m|swift|ts tsx|yaml yml"
+check "wizard shows the app opening each today" test "${(j:|:)wizard_now}" = "Android Studio|Xcode|Xcode|QuickTime Player|TextEdit"
+check "owning IDEs are kept, the rest goes to nvim" test "${(j:|:)wizard_suggest}" = "keep|keep|keep|nvim|nvim"
+check "groups on nvim are counted, not listed" test ${#wizard_on_nvim} -eq $(( all_types - 7 ))
+rex_nvim_wizard_table > $tmp/table.out
+check "table joins a group on one row" grep -q 'yaml, yml' $tmp/table.out
+check "table shows the ts note" grep -q 'opens .ts videos in nvim' $tmp/table.out
+
+rex_nvim_wizard_choose auto
+check "auto takes the suggestions" test "$reply" = "kt m swift"
+rex_nvim_wizard_choose ask <<< '' > /dev/null
+check "Enter accepts the suggestions" test "$reply" = "kt m swift"
+print -l p n '' k x k '' | rex_nvim_wizard_choose ask > /dev/null
+# A pipeline runs the last command in this shell in zsh, so reply is kept.
+check "picking each type overrides suggestions" test "$reply" = "m swift ts tsx"
+check "quit leaves the choice undone" test "$(rex_nvim_wizard_choose ask <<< q > /dev/null; print $?)" = 1
+check "end of input leaves the choice undone" test "$(rex_nvim_wizard_choose ask < /dev/null > /dev/null; print $?)" = 1
+
+rex_nvim_keep_write swift
+rex_nvim_wizard_rows
+check "an earlier keep stays suggested" test "${wizard_suggest[3]}" = keep
+
+STUB_MIXED=1 rex_nvim_wizard_rows
+check "a group half on nvim is still shown" test "${wizard_exts[4]}" = "ts tsx"
+check "a mixed group shows every app" test "${wizard_now[4]}" = "NvimOpen/QuickTime Player"
+
+# --- install and wizard: bindings and the keep list -------------------------
+
+# install EXT binds the whole group: ts and tsx kept, tsx asked.
+rex_nvim_keep_write ts tsx swift
+: > $STUB_DUTI_LOG
+rex_nvim_install tsx > /dev/null
+check "install EXT binds every type of its group" test "$(sort $STUB_DUTI_LOG | tr '\n' ' ')" = "com.microsoft.typescript public.mpeg-2-transport-stream "
+rex_nvim_keep_read
+check "install EXT takes the bound group off the keep list" test "$reply" = swift
+
+rex_nvim_keep_write ts tsx swift
+print public.mpeg-2-transport-stream > $STUB_DUTI_FAIL
+rex_nvim_install tsx > /dev/null 2>&1
+check "install EXT reports a failed binding" test $? -eq 1
+rex_nvim_keep_read
+check "a failed binding keeps its group on the list" test "$reply" = "swift ts tsx"
+: > $STUB_DUTI_FAIL
+
+STUB_BUILD_FAIL=1 rex_nvim_install swift > /dev/null 2>&1
+rex_nvim_keep_read
+check "a failed build leaves the keep list alone" test "$reply" = "swift ts tsx"
+
+rex_nvim_keep_write
+STUB_BUILD_FAIL=1 rex_nvim_wizard --yes < /dev/null > /dev/null 2>&1
+check "a failed build in the wizard leaves the keep list alone" test ! -s $REX_NVIM_KEEP_FILE -o -z "$(grep -v '^#' $REX_NVIM_KEEP_FILE)"
+
+: > $STUB_DUTI_LOG
+rex_nvim_wizard --yes < /dev/null > $tmp/wizard.out 2>&1
+check "wizard --yes succeeds" test $? -eq 0
+rex_nvim_keep_read
+check "wizard --yes keeps the suggestions" test "$reply" = "kt m swift"
+check "wizard binds what is not kept" grep -qx public.yaml $STUB_DUTI_LOG
+check "wizard does not bind what is kept" test -z "$(grep -x public.swift-source $STUB_DUTI_LOG)"
+
+# An empty PATH, not one without the stubs: that would find the real duti.
+mkdir -p $tmp/empty-path
+( PATH=$tmp/empty-path; rex_nvim_wizard --yes < /dev/null > /dev/null 2>&1 )
+check "missing duti stops the wizard first" test $? -eq 69
+
+# Keep list behind a symlink, and an unchanged list, are left in place.
+mkdir -p $tmp/dot
+print -l '# mine' swift > $tmp/dot/keep
+saved_keep=$REX_NVIM_KEEP_FILE
+REX_NVIM_KEEP_FILE=$tmp/config/linked-keep
+ln -s $tmp/dot/keep $REX_NVIM_KEEP_FILE
+rex_nvim_keep_write swift
+check "an unchanged list keeps the user's comments" grep -qx '# mine' $tmp/dot/keep
+rex_nvim_keep_write swift m
+check "a symlinked keep list stays a symlink" test -L $REX_NVIM_KEEP_FILE
+check "a symlinked keep list is written through" grep -qx m $tmp/dot/keep
+REX_NVIM_KEEP_FILE=$saved_keep
+
+# Plugin step against a scratch nvim config.
+export XDG_CONFIG_HOME=$tmp/xdg/config XDG_DATA_HOME=$tmp/xdg/data
+lazycfg=$XDG_CONFIG_HOME/nvim
+mkdir -p $lazycfg/lua/plugins
+print -r -- 'require("lazy").setup({ { import = "plugins" } })' > $lazycfg/init.lua
+spec=$lazycfg/lua/plugins/rex-nvim.lua
+
+STUB_PLUGIN=yes rex_nvim_wizard_plugin ask > $tmp/plugin.out < /dev/null
+check "loaded plugin needs no step" grep -q 'already loads' $tmp/plugin.out
+STUB_PLUGIN=no rex_nvim_wizard_plugin auto > $tmp/plugin.out
+check "auto only suggests the spec" test ! -e $spec
+check "auto names the spec file" grep -q "to load the nvim plugin: write the lazy.nvim spec $spec" $tmp/plugin.out
+STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< n > /dev/null
+check "a no leaves the config alone" test ! -e $spec
+STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > /dev/null
+check "a yes writes the lazy.nvim spec" grep -q "local dir = \[==\[$REX_NVIM_ROOT/nvim\]==\]" $spec
+check "the spec is valid Lua returning a spec" test "$($real_nvim --headless --clean -l /dev/stdin <<< "io.write(dofile([[$spec]])[1].name)" 2>&1)" = rex-nvim
+print -r -- '-- mine' > $spec
+check "writing the spec leaves no temporary file" test "$(print -l $lazycfg/lua/plugins/.*(N))" = ""
+STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > $tmp/plugin.out
+check "an existing spec is never overwritten" test "$(<$spec)" = '-- mine'
+rm $spec
+STUB_PLUGIN= rex_nvim_wizard_plugin ask <<< y > $tmp/plugin.out
+check "no answer from nvim offers no config change" test ! -e $spec
+
+# A config directory that is a symlink (into a dotfiles repo) is still seen
+# as lazy.nvim.
+mkdir -p $tmp/dotnvim/lua/plugins
+cp $lazycfg/init.lua $tmp/dotnvim/init.lua
+mkdir -p $XDG_CONFIG_HOME
+ln -s $tmp/dotnvim $XDG_CONFIG_HOME/linked
+NVIM_APPNAME=linked STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > /dev/null
+check "a symlinked lazy.nvim config gets the spec" test -e $tmp/dotnvim/lua/plugins/rex-nvim.lua
+check "a symlinked lazy.nvim config gets no pack link" test ! -e $XDG_DATA_HOME/linked/site/pack/rex-nvim/start/rex-nvim
+
+rm -rf $lazycfg/lua/plugins
+STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > $tmp/plugin.out
+check "lazy without lua/plugins gets the README" grep -q 'add the spec from the README' $tmp/plugin.out
+
+mkdir -p $XDG_CONFIG_HOME/plain
+print -r -- 'vim.o.number = true' > $XDG_CONFIG_HOME/plain/init.lua
+NVIM_APPNAME=plain STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > /dev/null
+pack=$XDG_DATA_HOME/plain/site/pack/rex-nvim/start/rex-nvim
+check "a plain config gets the pack symlink" test "${pack:A}" = ${REX_NVIM_ROOT:A}/nvim
+unset XDG_CONFIG_HOME XDG_DATA_HOME
+
 print "$passes passed, $failures failed"
 (( failures == 0 ))

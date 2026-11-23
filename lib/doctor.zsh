@@ -4,27 +4,18 @@
 # confirmation dialog is still pending, or after the user picked another app).
 
 source $REX_NVIM_ROOT/lib/types.zsh
+source $REX_NVIM_ROOT/lib/config.zsh
+source $REX_NVIM_ROOT/lib/probe.zsh
 
 integer doctor_failures=0
 ok()   { print -r -- "  ok    $1" }
 warn() { print -r -- "  warn  $1" }
 fail() { print -r -- "  FAIL  $1"; (( doctor_failures++ )) }
 
-# default_app TARGET: print the path of the app macOS would open TARGET with
-# (a file path, or a URL when it contains "://").
-default_app() {
-  local js
-  if [[ $1 == *://* ]]; then
-    js='ObjC.import("AppKit"); function run(a) { var u = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.URLWithString(a[0])); return u.isNil() ? "" : u.path.js }'
-  else
-    js='ObjC.import("AppKit"); function run(a) { var u = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.fileURLWithPath(a[0])); return u.isNil() ? "" : u.path.js }'
-  fi
-  osascript -l JavaScript -e $js -- $1 2>/dev/null
-}
-
 rex_nvim_doctor() {
   local tool bin app_bin ext got probe
-  local -a wrong
+  local -a wrong kept_elsewhere kept
+  doctor_failures=0
 
   print "tools"
   for tool in nvim jq perl duti rex; do
@@ -50,19 +41,27 @@ rex_nvim_doctor() {
   fi
 
   print "file types"
+  rex_nvim_keep_read
+  kept=($reply)
+  integer bound=$(( ${#REX_NVIM_TYPES} - ${#kept} ))
   probe=$(mktemp -d) || return 1
   for ext in ${(ko)REX_NVIM_TYPES}; do
     : > $probe/probe.$ext
     got=$(default_app $probe/probe.$ext)
-    [[ $got == $REX_NVIM_APP ]] || wrong+=("$ext -> ${${got:t:r}:-none}")
+    if (( ${kept[(Ie)$ext]} )); then
+      kept_elsewhere+=("$ext -> ${${got:t:r}:-none}")
+    elif [[ $got != $REX_NVIM_APP ]]; then
+      wrong+=("$ext -> ${${got:t:r}:-none}")
+    fi
   done
   rm -rf $probe
   if (( ${#wrong} )); then
-    fail "${#wrong} of ${#REX_NVIM_TYPES} types open elsewhere: ${(j:, :)wrong}"
+    fail "${#wrong} of $bound types open elsewhere: ${(j:, :)wrong}"
     print -r -- "        bind them with: rex-nvim install ${(j: :)${wrong%% *}}"
   else
-    ok "all ${#REX_NVIM_TYPES} types open with NvimOpen"
+    ok "all $bound types open with NvimOpen"
   fi
+  (( ${#kept_elsewhere} )) && ok "kept on purpose: ${(j:, :)kept_elsewhere} (see $REX_NVIM_KEEP_FILE)"
 
   print "browser"
   for probe in https://example.com http://example.com; do
@@ -77,6 +76,13 @@ rex_nvim_doctor() {
 
   print "Rex"
   if [[ -n $(rex_app_client) ]]; then ok "Rex app connected"; else warn "Rex app not connected"; fi
+  # The config is what decides; running instances are only informative (none
+  # is open most of the time a doctor runs).
+  case $(plugin_loaded) in
+    yes) ok "nvim config loads the rex-nvim plugin" ;;
+    no)  fail "nvim config does not load the rex-nvim plugin (see README, Install)" ;;
+    *)   warn "could not ask nvim whether its config loads the plugin (no answer in 15s)" ;;
+  esac
   local reg
   integer live=0
   for reg in ${(f)"$(rex_nvim_live_regs)"}; do
@@ -84,7 +90,7 @@ rex_nvim_doctor() {
     (( live++ ))
     ok "nvim ${reg:t:r} on ${reply[1]/#$HOME/~}"
   done
-  (( live )) || warn "no nvim registered: is the rex-nvim plugin in your nvim config? (see README)"
+  (( live )) || print -r -- "  info  no nvim open in a Rex pane right now"
 
   print
   if (( doctor_failures )); then
