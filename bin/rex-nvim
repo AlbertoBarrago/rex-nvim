@@ -1,0 +1,47 @@
+#!/bin/zsh
+# rex-nvim: nvim integration for the Rex terminal on macOS.
+#
+#   rex-nvim open FILE...     open files in the project's nvim, or in a tab of
+#                             the Rex "files" session (glow for Markdown)
+#   rex-nvim edit [DIR]       start nvim in DIR, registered so `open` can reach it
+#   rex-nvim install [EXT...] build NvimOpen.app and make it the default app for
+#                             code and text files, so file hyperlinks land in nvim
+#
+# The script resolves its own path through the ~/.local/bin symlink, so the
+# libraries are read from this clone and `git pull` updates everything.
+
+emulate -R zsh
+setopt null_glob pipe_fail
+
+REX_NVIM_ROOT=${0:A:h:h}
+source $REX_NVIM_ROOT/lib/common.zsh
+source $REX_NVIM_ROOT/lib/registry.zsh
+
+usage() {
+  print -r -- "usage: rex-nvim open FILE... | edit [DIR] | install [EXT...]"
+}
+
+case ${1:-} in
+  open)
+    shift
+    source $REX_NVIM_ROOT/lib/open.zsh
+    rex_nvim_open "$@"
+    ;;
+  edit)
+    shift
+    source $REX_NVIM_ROOT/lib/edit.zsh
+    rex_nvim_edit "$@"
+    ;;
+  install)
+    shift
+    source $REX_NVIM_ROOT/lib/install.zsh
+    rex_nvim_install "$@"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac
