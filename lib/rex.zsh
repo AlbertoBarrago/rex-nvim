@@ -26,13 +26,30 @@ rex_ensure_app() {
   [[ -n $app ]] && print -r -- $app
 }
 
+# rex_app_accepts_actions APP: succeed when the Rex app performs actions sent
+# from the CLI. With Remote Control off (Rex Settings, Rex Server) it refuses
+# them all; REPLY is then Rex's error. client.update.status only reports, so
+# probing with it changes nothing on screen.
+rex_app_accepts_actions() {
+  REPLY=$(rex do -C $1 client.update.status 2>&1 >/dev/null) && return 0
+  REPLY=${${REPLY#Error: }:-rex do failed}
+  return 1
+}
+
 # rex_show_session APP SESSION: make the Rex app show SESSION and come to the
 # front. Rex's own focus commands move focus inside a session only; the app
-# keeps showing whatever session it was on.
+# keeps showing whatever session it was on. A refused session.select is
+# reported: the file did open, but in a session the user is not looking at.
 rex_show_session() {
   [[ -n $1 && -n $2 ]] || return 1
-  rex do -C $1 session.select session_id=$2 >/dev/null 2>&1
+  local err
+  integer rc=0
+  if ! err=$(rex do -C $1 session.select session_id=$2 2>&1 >/dev/null); then
+    notify "Rex did not switch to the file's session: ${${err#Error: }:-rex do failed}"
+    rc=1
+  fi
   open -b $REX_NVIM_APP_BUNDLE_ID 2>/dev/null
+  return rc
 }
 
 # rex_session_by_label LABEL: print the id of the first session with LABEL.

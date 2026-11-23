@@ -81,7 +81,18 @@ rex_nvim_doctor() {
   if [[ $got == $REX_NVIM_APP ]]; then fail ".html opens with NvimOpen"; else ok "html -> ${got:t:r}"; fi
 
   ui_section "Rex"
-  if [[ -n $(rex_app_client) ]]; then ok "Rex app connected"; else warn "Rex app not connected"; fi
+  # Without Remote Control files still open, but in a session the app is not
+  # showing: every click looks like it did nothing.
+  local app_client
+  app_client=$(rex_app_client)
+  if [[ -z $app_client ]]; then
+    warn "Rex app not connected"
+  elif rex_app_accepts_actions $app_client; then
+    ok "Rex app connected, accepts actions"
+  else
+    fail "Rex app refuses actions: $REPLY"
+    ui_detail "files open in a session Rex does not show; turn on Rex Settings > Rex Server > Remote Control"
+  fi
   # The config is what decides; running instances are only informative (none
   # is open most of the time a doctor runs).
   local loaded
