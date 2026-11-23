@@ -54,7 +54,7 @@ rex_nvim_doctor() {
   for ext in ${(ko)REX_NVIM_TYPES}; do
     : > $probe/probe.$ext
     got=$(default_app $probe/probe.$ext)
-    [[ $got == $REX_NVIM_APP ]] || wrong+=("$ext -> ${got:t:r:-none}")
+    [[ $got == $REX_NVIM_APP ]] || wrong+=("$ext -> ${${got:t:r}:-none}")
   done
   rm -rf $probe
   if (( ${#wrong} )); then
