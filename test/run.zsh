@@ -367,6 +367,7 @@ check "doctor exits 0 once they are kept (counter reset per run)" test $? -eq 0
 check "kept types do not fail" test -z "$(grep 'types open elsewhere' $tmp/doctor.out)"
 check "kept types are listed as a choice" grep -q 'ok    kept on purpose: m -> Xcode, swift -> Xcode' $tmp/doctor.out
 check "kept types leave the bound count" grep -q "all $(( all_types - 2 )) types open with NvimOpen" $tmp/doctor.out
+check "doctor without a terminal prints no escape sequences" test -z "$(grep $'\e' $tmp/doctor.out)"
 check "loaded plugin is reported" grep -q 'ok    nvim config loads the rex-nvim plugin' $tmp/doctor.out
 
 STUB_PLUGIN=no rex_nvim_doctor > $tmp/doctor.out 2>&1
@@ -436,6 +437,31 @@ STUB_MIXED=1 rex_nvim_wizard_rows
 check "a group half on nvim is still shown" test "${wizard_exts[4]}" = "ts tsx"
 check "a mixed group shows every app" test "${wizard_now[4]}" = "NvimOpen/QuickTime Player"
 
+# Terminal picker: it reads keys from stdin, so they can be piped. Rows:
+# kt, m, swift (keep), ts tsx, yaml yml (nvim).
+rex_nvim_keep_write
+rex_nvim_wizard_rows
+pick() { print -rn -- "$1" | rex_nvim_wizard_pick > $tmp/pick.out }
+pick $'\n'
+check "picker: Enter takes the suggestions" test "$reply" = "kt m swift"
+pick $'j \n'
+check "picker: j and space toggle the second row" test "$reply" = "kt swift"
+pick $'\e[B\e[B\e[B \n'
+check "picker: arrows move, a group toggles whole" test "$reply" = "kt m swift ts tsx"
+pick $'kk \n'
+check "picker: up stops at the first row" test "$reply" = "m swift"
+pick $'a\n'
+check "picker: a sends every row to nvim" test -z "$reply"
+pick $'a s\n'
+check "picker: s restores the suggestions" test "$reply" = "kt m swift"
+check "picker: q stops" test "$(pick q; print $?)" = 1
+check "picker: Esc stops" test "$(pick $'\e'; print $?)" = 1
+check "picker: end of input stops" test "$(pick ''; print $?)" = 1
+ui_rows=13 pick $'jjjj \n'
+check "picker: a short terminal scrolls a window" test "$reply" = "kt m swift yaml yml"
+check "picker: the window shows its position" grep -q '3-5 of 5' $tmp/pick.out
+check "picker: the final frame counts the choice" grep -q '1 to nvim, 4 kept' $tmp/pick.out
+
 # --- install and wizard: bindings and the keep list -------------------------
 
 # install EXT binds the whole group: ts and tsx kept, tsx asked.
@@ -469,6 +495,7 @@ rex_nvim_keep_read
 check "wizard --yes keeps the suggestions" test "$reply" = "kt m swift"
 check "wizard binds what is not kept" grep -qx public.yaml $STUB_DUTI_LOG
 check "wizard does not bind what is kept" test -z "$(grep -x public.swift-source $STUB_DUTI_LOG)"
+check "wizard without a terminal prints no escape sequences" test -z "$(grep $'\e' $tmp/wizard.out)"
 
 # An empty PATH, not one without the stubs: that would find the real duti.
 mkdir -p $tmp/empty-path
