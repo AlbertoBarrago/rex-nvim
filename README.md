@@ -1,6 +1,16 @@
-# rex-nvim
+<p align="center">
+  <img src="docs/assets/logo.svg" width="128" height="128" alt="rex-nvim logo">
+</p>
+
+<h1 align="center">rex-nvim</h1>
 
 nvim integration for the [Rex](https://www.superlogical.com/rex) terminal on macOS: clicking a file hyperlink (or double-clicking a code file in Finder) opens it in nvim inside Rex instead of a GUI editor.
+
+<p align="center">
+  <img src="docs/assets/teaser.gif" width="720" alt="Clicking a file:line in Rex opens it in the pane's nvim; a file double-clicked in Finder opens in a new nvim tab of its project's session; Markdown opens in glow">
+  <br>
+  <sub><a href="docs/assets/teaser.mp4">Full-resolution video (MP4)</a></sub>
+</p>
 
 Where a file goes, first match wins:
 
