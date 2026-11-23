@@ -27,12 +27,18 @@ stubs=$tmp/stubs
 mkdir -p $stubs
 # The rex stub answers from fixtures in $STUB_FIX: sessions.json (rex ls),
 # blocks-<session>.json (rex block ls), pwd-<block>.json (block call pwd);
-# $STUB_APP, when set, is the connected app client.
+# $STUB_APP, when set, is the connected app client; $STUB_REFUSE, when set,
+# makes the app refuse every action, as Rex does with Remote Control off.
 cat > $stubs/rex <<'EOF'
 #!/bin/zsh
 print -r -- "rex ${(j: :)${(q)@}}" >> $STUB_LOG
 fix() { [[ -r $STUB_FIX/$1 ]] && cat $STUB_FIX/$1 || print -r -- $2 }
 case "$1 $2" in
+  "do "*)
+    if [[ -n ${STUB_REFUSE:-} ]]; then
+      print -u2 "Error: Rex.app is not accepting actions. Turn on Remote Control."
+      exit 1
+    fi ;;
   "ls "*) fix sessions.json '{"sessions":[]}' ;;
   "client ls")
     if [[ -n ${STUB_APP:-} ]]; then
@@ -192,6 +198,15 @@ print -r -- '{"sessions":[{"session_id":"session:f1","label":"files"}]}' > $STUB
 rex_nvim_open $loose/Main.java
 check "existing files session is reused" grep -q -- "rex run -s session:f1 .*-- nvim -- $loose/Main.java" $STUB_LOG
 check "the app is shown the target session" grep -q -- "rex do -C client:app session.select session_id=session:f1" $STUB_LOG
+
+# Remote Control off: the file still opens, but the app stays on its session,
+# so the refusal must reach the user instead of looking like a dead click.
+: > $STUB_LOG
+: > $tmp/notify.log
+STUB_REFUSE=1 rex_nvim_open $loose/Main.java
+check "refused session switch still opens the file" test $? -eq 0
+check "refused session switch is reported" grep -q 'did not switch to the file.s session: Rex.app is not accepting actions' $tmp/notify.log
+check "refused session switch still brings Rex forward" grep -q -- "open -b com.superlogical.rex" $STUB_LOG
 
 # One nvim serves the files session: further unclaimed files go to it.
 filesdir=$tmp/filesdir
@@ -375,6 +390,13 @@ check "missing plugin in the config fails" grep -q 'FAIL  nvim config does not l
 STUB_PLUGIN= rex_nvim_doctor > $tmp/doctor.out 2>&1
 check "doctor exits 0 when nvim does not answer" test $? -eq 0
 check "nvim that does not answer only warns" grep -q 'warn  could not ask nvim' $tmp/doctor.out
+
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "app accepting actions is reported" grep -q 'ok    Rex app connected, accepts actions' $tmp/doctor.out
+STUB_REFUSE=1 rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor exits 1 when the app refuses actions" test $? -eq 1
+check "app refusing actions fails with Rex's reason" grep -q 'FAIL  Rex app refuses actions: Rex.app is not accepting actions' $tmp/doctor.out
+check "app refusing actions points at Remote Control" grep -q 'Remote Control' $tmp/doctor.out
 
 # The real probe, against scratch configs: a plugin flagged after VimEnter
 # (as lazy.nvim's VeryLazy loads) counts, and the ShaDa file is not touched.
