@@ -20,7 +20,7 @@ rex-nvim install                   # asks which file types go to nvim, binds the
 rex-nvim doctor                    # after confirming the dialogs
 ```
 
-`rex-nvim install` lists every file type that does not open in nvim yet, with the app opening it today and a suggestion: nvim, or keep the current app when that app owns the type (Xcode for `.swift`, `.m`, `.mm`; Android Studio or IntelliJ IDEA for `.kt`, `.kts`, `.gradle`). Press Enter to accept the suggestions, `p` to pick each type, `q` to stop without changes. `rex-nvim install --yes`, or a run without a terminal, takes the suggestions without asking.
+`rex-nvim install` lists every file type that does not open in nvim yet, with the app opening it today and a suggestion: nvim, or keep the current app when that app owns the type (Xcode for `.swift`, `.m`, `.mm`; Android Studio or IntelliJ IDEA for `.kt`, `.kts`, `.gradle`). In the picker, move with the arrows or `j`/`k`, toggle a type between nvim and keep with space, set every type to nvim with `a`, go back to the suggestions with `s`, apply with Enter, or stop without changes with `q` or Esc. On a terminal without cursor support (`TERM=dumb`) it asks line by line instead: Enter accepts the suggestions, `p` picks each type, `q` stops. Colors follow [`NO_COLOR`](https://no-color.org), and so does `rex-nvim doctor`. `rex-nvim install --yes`, or a run without a terminal, takes the suggestions without asking.
 
 macOS asks to confirm each newly bound file type (one per type that already has another default app: up to about 30 on a fresh machine, none on a rerun): confirm only the ones that name NvimOpen. `rex-nvim install EXT...` binds only the given extensions, handy to add one later.
 

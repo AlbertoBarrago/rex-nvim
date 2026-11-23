@@ -10,6 +10,7 @@
 
 source $REX_NVIM_ROOT/lib/types.zsh
 source $REX_NVIM_ROOT/lib/config.zsh
+source $REX_NVIM_ROOT/lib/ui.zsh
 
 # rex_nvim_build_app DEST: compile and configure NvimOpen.app at DEST.
 rex_nvim_build_app() {
@@ -124,12 +125,12 @@ rex_nvim_bind() {
 rex_nvim_bind_report() {
   # duti succeeds as soon as the change is requested: macOS applies it only
   # once the user confirms the dialog, so "requested" is all that is known.
-  print "NvimOpen at $REX_NVIM_APP: ${#bind_requested} requested, ${#bind_already} already set"
+  ui_say ok "NvimOpen at $REX_NVIM_APP: ${#bind_requested} requested, ${#bind_already} already set"
   if (( ${#bind_requested} )); then
-    print "Confirm each macOS dialog with \"NvimOpen\", then check with: rex-nvim doctor"
+    ui_say warn "Confirm each macOS dialog with \"NvimOpen\", then check with: rex-nvim doctor"
   fi
   if (( ${#bind_failed} )); then
-    print -u2 "rex-nvim: could not bind: ${bind_failed[*]}"
+    ui_say fail "could not bind: ${bind_failed[*]}"
     return 1
   fi
 }
@@ -137,6 +138,7 @@ rex_nvim_bind_report() {
 rex_nvim_install() {
   local ext uti
   local -a selected kept bound group
+  ui_init
 
   rex_nvim_install_preflight $@ || return
   rex_nvim_keep_read
@@ -151,7 +153,7 @@ rex_nvim_install() {
     selected=(${(u)selected})
   else
     selected=(${${(k)REX_NVIM_TYPES}:|kept})
-    (( ${#kept} )) && print "keeping on their current app: ${(j:, :)kept} (listed in $REX_NVIM_KEEP_FILE)"
+    (( ${#kept} )) && ui_say info "keeping on their current app: ${(j:, :)kept} (listed in $REX_NVIM_KEEP_FILE)"
   fi
 
   rex_nvim_install_app || return
