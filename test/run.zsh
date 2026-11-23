@@ -1,19 +1,21 @@
 #!/bin/zsh
-# test/run.zsh: tests for rex-nvim's registry, `edit` and `open`.
+# test/run.zsh: tests for the rex-nvim plugin, registry, `edit` and `open`.
 #
-# Registry tests run real headless nvim servers. `edit` and `open` run against
-# stub `nvim`/`rex`/`glow` commands that log their arguments, so the tests
-# never touch the user's Rex sessions or LaunchServices.
+# nvim instances are real (headless, with the plugin loaded); `rex` and `glow`
+# are stubs that log their arguments, and they come first in PATH for the
+# whole suite, so it never touches the user's Rex sessions.
 # Usage: zsh test/run.zsh
 
 emulate -R zsh
 setopt null_glob pipe_fail
+zmodload zsh/datetime
 
 REX_NVIM_ROOT=${0:A:h:h}
 real_nvim=$(command -v nvim) || { print -u2 "tests need nvim"; exit 1 }
 
-# Short scratch path: nvim sockets live under it too (104-byte sun_path).
+# Short scratch path: it holds nvim working dirs and the registry.
 tmp=$(mktemp -d /tmp/rex-nvim-test.XXXXXX)
+tmp=${tmp:A}
 typeset -a server_pids
 cleanup() {
   (( ${#server_pids} )) && kill $server_pids 2>/dev/null
@@ -21,12 +23,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
+stubs=$tmp/stubs
+mkdir -p $stubs
+cat > $stubs/rex <<'EOF'
+#!/bin/zsh
+print -r -- "rex ${(j: :)${(q)@}}" >> $STUB_LOG
+if [[ $1 == ls ]]; then print -r -- ${STUB_SESSIONS:-'{"sessions":[]}'}; fi
+EOF
+cat > $stubs/glow <<'EOF'
+#!/bin/zsh
+print -r -- "glow $*" >> $STUB_LOG
+EOF
+chmod +x $stubs/*
+export PATH=$stubs:$PATH STUB_LOG=$tmp/stub.log
 export REX_NVIM_STATE_DIR=$tmp/state
-mkdir -p $REX_NVIM_STATE_DIR
+
 source $REX_NVIM_ROOT/lib/common.zsh
 source $REX_NVIM_ROOT/lib/registry.zsh
 source $REX_NVIM_ROOT/lib/open.zsh
 source $REX_NVIM_ROOT/lib/edit.zsh
+# common.zsh appends fallbacks to PATH; the stubs must stay first.
+path=($stubs ${path:#$stubs})
 # notify must not raise macOS notifications during tests.
 notify() { print -r -- "notify: $1" >> $tmp/notify.log }
 
@@ -42,131 +59,135 @@ check() {
   fi
 }
 
-# serve ROOT: start a headless nvim registered for ROOT (session s1, block b-ROOT).
+# serve DIR [SESSION]: start a headless nvim in DIR with the plugin loaded, as
+# if it ran in Rex block b-<dirname>; set REPLY to its pid once registered.
 serve() {
-  local root=${1:A}
-  rex_nvim_paths $root
-  $real_nvim --headless --clean --listen $reply[1] >/dev/null 2>&1 &
-  server_pids+=($!)
-  print -rl -- $root s1 "b-${root:t}" > $reply[2]
-  repeat 50; do [[ -S $reply[1] ]] && return; sleep 0.1; done
-  print -u2 "serve: nvim did not start for $root"
+  local dir=$1 session=${2:-s1}
+  (
+    builtin cd -- $dir
+    export REX_BLOCK=b-${dir:t} REX_SESSION=$session
+    exec $real_nvim --headless --clean --cmd "set rtp^=$REX_NVIM_ROOT/nvim" -c 'runtime plugin/rex-nvim.lua'
+  ) >/dev/null 2>&1 &
+  REPLY=$!
+  server_pids+=($REPLY)
+  repeat 50; do [[ -e $REX_NVIM_STATE_DIR/$REPLY.reg ]] && return 0; sleep 0.1; done
+  print -u2 "serve: nvim did not register for $dir"
   return 1
 }
 
-# --- registry ---------------------------------------------------------------
+# ask PID EXPR: evaluate EXPR in the nvim with PID.
+ask() {
+  rex_nvim_read_reg $REX_NVIM_STATE_DIR/$1.reg && $real_nvim --server $reply[4] --remote-expr $2 2>/dev/null
+}
 
-rex_nvim_paths "/a/very/long/${(l:200::x:)}/project"
-check "socket path stays under sun_path limit" test ${#reply[1]} -lt 104
-check "socket and block share a name" test ${reply[1]:r} = ${reply[2]:r}
+# --- plugin registration ----------------------------------------------------
 
-parent=$tmp/work/app
+work=$tmp/work
+parent=$work/app
 child=$parent/packages/ui
-spaced="$tmp/work/my project"
-mkdir -p $child "$spaced" $tmp/work/application
-for f in $parent/a.ts $child/b.ts "$spaced/c d.ts" $tmp/work/application/x.ts; do : > $f; done
-serve $parent && serve $child && serve "$spaced"
+spaced="$work/my project"
+mkdir -p $child "$spaced" $work/application
+ln -s $parent $tmp/app-link
+for f in $parent/a.ts $child/b.ts "$spaced/c d.ts" $work/application/x.ts; do : > $f; done
+print -l one two three four five > $parent/lines.txt
 
-found=$(rex_nvim_find ${parent:A}/a.ts)
-check "file goes to its project's nvim" test "$(sed -n 1p $found 2>/dev/null)" = ${parent:A}
-found=$(rex_nvim_find ${child:A}/b.ts)
-check "deepest project wins" test "$(sed -n 1p $found 2>/dev/null)" = ${child:A}
-found=$(rex_nvim_find "${spaced:A}/c d.ts")
-check "paths with spaces match" test "$(sed -n 1p $found 2>/dev/null)" = "${spaced:A}"
-found=$(rex_nvim_find ${tmp:A}/work/application/x.ts)
+serve $tmp/app-link && pid_parent=$REPLY
+rex_nvim_read_reg $REX_NVIM_STATE_DIR/$pid_parent.reg
+check "plugin registers the physical root" test "$reply[1]" = $parent
+check "plugin registers session and block" test "$reply[2] $reply[3]" = "s1 b-app-link"
+check "plugin registers a reachable server" test "$($real_nvim --server $reply[4] --remote-expr 1 2>/dev/null)" = 1
+
+serve $child && pid_child=$REPLY
+serve "$spaced" && pid_spaced=$REPLY
+
+found=$(rex_nvim_find $parent/a.ts)
+check "file goes to its project's nvim" test "$found" = $REX_NVIM_STATE_DIR/$pid_parent.reg
+found=$(rex_nvim_find $child/b.ts)
+check "deepest project wins" test "$found" = $REX_NVIM_STATE_DIR/$pid_child.reg
+found=$(rex_nvim_find "$spaced/c d.ts")
+check "paths with spaces match" test "$found" = $REX_NVIM_STATE_DIR/$pid_spaced.reg
+found=$(rex_nvim_find $work/application/x.ts)
 check "sibling sharing a name prefix does not match" test -z "$found"
 
-orphan_root=$tmp/work/gone
-mkdir -p $orphan_root
-rex_nvim_paths ${orphan_root:A}
-print -rl -- ${orphan_root:A} s1 b-gone > $reply[2]
-orphan_blk=$reply[2]
-found=$(rex_nvim_find ${orphan_root:A}/z.ts)
-check "orphan registration is ignored" test -z "$found"
-check "orphan registration is removed" test ! -e $orphan_blk
+# Two nvim on the same root: the most recently focused (newest mtime) wins.
+serve $parent && pid_parent2=$REPLY
+touch -t 202001010000 $REX_NVIM_STATE_DIR/$pid_parent.reg
+found=$(rex_nvim_find $parent/a.ts)
+check "same root: most recent registration wins" test "$found" = $REX_NVIM_STATE_DIR/$pid_parent2.reg
+kill $pid_parent2 && wait $pid_parent2 2>/dev/null
+check "plugin removes its registration on exit" test ! -e $REX_NVIM_STATE_DIR/$pid_parent2.reg
 
-# --- stubs ------------------------------------------------------------------
+print -l $work/gone s1 b-gone /nonexistent.sock > $REX_NVIM_STATE_DIR/999999.reg
+rex_nvim_live_regs >/dev/null
+check "registration of a dead pid is removed" test ! -e $REX_NVIM_STATE_DIR/999999.reg
 
-stubs=$tmp/stubs
-mkdir -p $stubs
-cat > $stubs/rex <<'EOF'
-#!/bin/zsh
-print -r -- "rex ${(j: :)${(q)@}}" >> $STUB_LOG
-if [[ $1 == ls ]]; then print -r -- ${STUB_SESSIONS:-'{"sessions":[]}'}; fi
-EOF
-cat > $stubs/glow <<'EOF'
-#!/bin/zsh
-print -r -- "glow $*" >> $STUB_LOG
-EOF
-# The nvim stub records the .block file while running, as `edit` sees it.
-cat > $stubs/nvim <<'EOF'
-#!/bin/zsh
-print -r -- "nvim $*" >> $STUB_LOG
-[[ -n ${STUB_BLOCKS_DIR:-} ]] && cat $STUB_BLOCKS_DIR/*.block >> $STUB_LOG 2>/dev/null
-[[ -n ${STUB_TAKEOVER:-} ]] && sed -i '' '3s/.*/b-other/' $STUB_BLOCKS_DIR/*.block
-exit 0
-EOF
-chmod +x $stubs/*
-export STUB_LOG=$tmp/stub.log
+# --- open: registered nvim ----------------------------------------------------
 
-# --- edit -------------------------------------------------------------------
+: > $STUB_LOG
+rex_nvim_open $parent/a.ts
+check "project file loads in the project's nvim" test "$(ask $pid_parent 'expand("%:p")')" = $parent/a.ts
+check "project nvim pane gets the focus" grep -q -- "rex focus -s s1 b-app-link" $STUB_LOG
+check "project file never opens a tab" test -z "$(grep 'rex \(new\|run\)' $STUB_LOG)"
 
-proj=$tmp/edit/proj
-mkdir -p $proj
-(
-  export PATH=$stubs:$PATH REX_NVIM_STATE_DIR=$tmp/edit-state STUB_BLOCKS_DIR=$tmp/edit-state
-  REX_NVIM_STATE=$REX_NVIM_STATE_DIR REX_SESSION=s9 REX_BLOCK=b9
-  : > $STUB_LOG
-  rex_nvim_edit $proj
-)
-check "edit starts nvim listening on the project socket" grep -q -- '--listen .*\.sock \.$' $STUB_LOG
-check "edit registers root, session and block" grep -qx -- "b9" $STUB_LOG
-check "edit registration holds the physical root" grep -qx -- ${proj:A} $STUB_LOG
-check "edit removes its registration on exit" test -z "$(print $tmp/edit-state/*.block)"
+rex_nvim_open $parent/lines.txt:4
+check "FILE:LINE puts the cursor on the line" test "$(ask $pid_parent 'line(".")')" = 4
+rex_nvim_open $parent/lines.txt:2:3
+check "FILE:LINE:COL puts the cursor on the column" test "$(ask $pid_parent 'line(".") . ":" . col(".")')" = 2:3
 
-(
-  export PATH=$stubs:$PATH REX_NVIM_STATE_DIR=$tmp/edit-state STUB_BLOCKS_DIR=$tmp/edit-state STUB_TAKEOVER=1
-  REX_NVIM_STATE=$REX_NVIM_STATE_DIR REX_SESSION=s9 REX_BLOCK=b9
-  rex_nvim_edit $proj
-)
-check "edit keeps a registration another pane took over" test -n "$(print $tmp/edit-state/*.block)"
+ask $pid_parent 'execute("setlocal winfixbuf")' >/dev/null
+rex_nvim_open $child/../../a.ts >/dev/null
+rex_nvim_open $parent/lines.txt
+check "winfixbuf window keeps its buffer" test "$(ask $pid_parent 'winnr("$")')" = 2
 
-(
-  export PATH=$stubs:$PATH
-  unset REX_BLOCK
-  : > $STUB_LOG
-  rex_nvim_edit $proj
-)
-check "edit outside Rex runs plain nvim" grep -qx -- 'nvim .' $STUB_LOG
+# A busy nvim (blocking :!cmd) must not hang the click: it falls back to a tab.
+: > $STUB_LOG
+rex_nvim_read_reg $REX_NVIM_STATE_DIR/$pid_spaced.reg
+$real_nvim --server $reply[4] --remote-send ':!sleep 8<CR>' 2>/dev/null
+sleep 0.3
+start=$EPOCHSECONDS
+rex_nvim_open "$spaced/c d.ts"
+check "busy nvim times out instead of hanging" test $(( EPOCHSECONDS - start )) -le $(( REX_NVIM_SEND_TIMEOUT + 2 ))
+check "busy nvim falls back to a tab" grep -q -- "rex new files .*-- nvim --" $STUB_LOG
+check "busy nvim is reported" grep -q 'is busy' $tmp/notify.log
 
-# --- open -------------------------------------------------------------------
+# --- open: unclaimed files ---------------------------------------------------
 
 loose=$tmp/loose
 mkdir -p $loose
 : > $loose/notes.md
-: > $loose/Main.java
+print -l a b c > $loose/Main.java
 
-(
-  export PATH=$stubs:$PATH
-  : > $STUB_LOG
-  rex_nvim_open $loose/notes.md $loose/Main.java
-)
-check "markdown opens in glow" grep -q -- "rex new files .*-- glow -p ${loose:A}/notes.md" $STUB_LOG
-check "other files open in nvim" grep -q -- "rex new files .*-- nvim -- ${loose:A}/Main.java" $STUB_LOG
+: > $STUB_LOG
+rex_nvim_open $loose/notes.md $loose/Main.java
+check "markdown opens in glow" grep -q -- "rex new files .*-- glow -p $loose/notes.md" $STUB_LOG
+check "other files open in nvim" grep -q -- "rex new files .*-- nvim -- $loose/Main.java" $STUB_LOG
 
-(
-  export PATH=$stubs:$PATH STUB_SESSIONS='{"sessions":[{"session_id":"session:f1","label":"files"}]}'
-  : > $STUB_LOG
-  rex_nvim_open $loose/Main.java
-)
-check "existing files session is reused" grep -q -- "rex run -s session:f1 .*-- nvim -- ${loose:A}/Main.java" $STUB_LOG
+: > $STUB_LOG
+rex_nvim_open $loose/Main.java:3
+check "FILE:LINE in a new tab starts nvim on the line" grep -q -- "-- nvim +3 -- $loose/Main.java" $STUB_LOG
 
-(
-  : > $STUB_LOG
-  rex_nvim_open ${parent:A}/a.ts
-)
-check "project file never opens a files tab" test -z "$(grep 'rex \(new\|run\)' $STUB_LOG)"
-check "project file loads in the project's nvim" test "$($real_nvim --server ${$(rex_nvim_find ${parent:A}/a.ts):r}.sock --remote-expr 'bufname()' 2>/dev/null)" = ${parent:A}/a.ts
+: > $STUB_LOG
+STUB_SESSIONS='{"sessions":[{"session_id":"session:f1","label":"files"}]}' rex_nvim_open $loose/Main.java
+check "existing files session is reused" grep -q -- "rex run -s session:f1 .*-- nvim -- $loose/Main.java" $STUB_LOG
+
+: > $loose/odd:7
+rex_nvim_parse_target $loose/odd:7
+check "an existing name with a colon is not split" test "$reply[1] $reply[2]" = "$loose/odd:7 0"
+
+# --- edit ---------------------------------------------------------------------
+
+nvim_stub=$tmp/nvim-stub
+mkdir -p $nvim_stub
+cat > $nvim_stub/nvim <<'EOF'
+#!/bin/zsh
+print -r -- "nvim $*" >> $STUB_LOG
+print -r -- "cwd $PWD" >> $STUB_LOG
+EOF
+chmod +x $nvim_stub/nvim
+: > $STUB_LOG
+( path=($nvim_stub $path); rex_nvim_edit $parent )
+check "edit starts nvim in the directory" grep -qx -- "cwd $parent" $STUB_LOG
+check "edit loads the plugin from this clone" grep -q -- "rtp:append(\[==\[$REX_NVIM_ROOT/nvim\]==\])" $STUB_LOG
 
 print "$passes passed, $failures failed"
 (( failures == 0 ))

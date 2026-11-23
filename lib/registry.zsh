@@ -1,44 +1,58 @@
-# Registry of running nvim instances, one per project.
+# Reading the registry of nvim instances running in Rex panes.
 #
-# Each registered nvim listens on $REX_NVIM_STATE/<hash>.sock, where <hash> is
-# a short sha256 of the project's physical root (symlinks resolved). Hashing
-# keeps the path under the 104-byte sun_path limit whatever the project depth.
-# The <hash>.block file beside the socket holds three lines: the project root,
-# the Rex session id and the Rex block id of the pane running that nvim.
+# The nvim plugin (nvim/lua/rex-nvim/registry.lua) writes
+# $REX_NVIM_STATE/<pid>.reg with four lines: the physical working directory
+# (the project root), the Rex session id, the Rex block id and the nvim RPC
+# address. It refreshes the file when the pane gains focus, so the newest
+# mtime marks the most recently used nvim.
 
-# rex_nvim_paths ROOT: set reply=(SOCKET BLOCKFILE) for project ROOT.
-rex_nvim_paths() {
-  local hash
-  hash=$(print -rn -- $1 | shasum -a 256 | cut -c1-16)
-  reply=($REX_NVIM_STATE/$hash.sock $REX_NVIM_STATE/$hash.block)
+# rex_nvim_read_reg FILE: set reply=(ROOT SESSION BLOCK SERVER), or fail when
+# FILE is malformed.
+rex_nvim_read_reg() {
+  reply=("${(@f)$(<$1)}")
+  (( ${#reply} == 4 )) && [[ -n $reply[1] && -n $reply[4] ]]
 }
 
-# rex_nvim_alive SOCKET: succeed if an nvim answers on SOCKET.
-rex_nvim_alive() {
-  [[ -S $1 ]] && nvim --server $1 --remote-expr 1 >/dev/null 2>&1
-}
-
-# rex_nvim_find FILE: print the block file of the nvim whose project holds
-# FILE (an absolute physical path). The deepest matching root wins, so a nvim
-# on a subproject beats one on its parent.
-rex_nvim_find() {
-  local file=$1 blk best
-  local -a meta
-  integer best_len=0
-  for blk in $REX_NVIM_STATE/*.block; do
-    meta=("${(@f)$(<$blk)}")
-    (( ${#meta} == 3 )) || continue
-    [[ $file == ${meta[1]}/* ]] || continue
-    (( ${#meta[1]} > best_len )) || continue
-    if [[ ! -S ${blk:r}.sock ]]; then
-      # Left by an nvim that exited without cleaning up.
-      rm -f $blk
+# rex_nvim_live_regs: print live registration files, newest first, and remove
+# the ones whose nvim has exited (crash, kill -9, closed pane).
+rex_nvim_live_regs() {
+  local reg pid
+  for reg in $REX_NVIM_STATE/*.reg(om); do
+    pid=${reg:t:r}
+    if [[ $pid != <-> ]] || ! kill -0 $pid 2>/dev/null; then
+      rm -f $reg
       continue
     fi
-    # A socket that does not answer (nvim busy in a blocking command) is
-    # skipped for this file, never removed: the nvim may still be alive.
-    rex_nvim_alive ${blk:r}.sock || continue
-    best=$blk best_len=${#meta[1]}
+    print -r -- $reg
+  done
+}
+
+# rex_nvim_find FILE: print the registration of the nvim whose project holds
+# FILE (an absolute physical path). The deepest root wins; among nvim on the
+# same root, the most recently focused one.
+rex_nvim_find() {
+  local file=$1 reg best
+  integer best_len=0
+  for reg in ${(f)"$(rex_nvim_live_regs)"}; do
+    rex_nvim_read_reg $reg || continue
+    [[ $file == $reply[1]/* ]] || continue
+    # Strictly greater: on a tie the newer registration, listed first, stays.
+    (( ${#reply[1]} > best_len )) || continue
+    best=$reg best_len=${#reply[1]}
   done
   [[ -n $best ]] && print -r -- $best
+}
+
+# rex_nvim_find_in_session SESSION: print the most recently focused live
+# registration in SESSION, whatever its root.
+rex_nvim_find_in_session() {
+  local reg
+  for reg in ${(f)"$(rex_nvim_live_regs)"}; do
+    rex_nvim_read_reg $reg || continue
+    if [[ $reply[2] == $1 ]]; then
+      print -r -- $reg
+      return 0
+    fi
+  done
+  return 1
 }

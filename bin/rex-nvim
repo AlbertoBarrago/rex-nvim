@@ -1,9 +1,9 @@
 #!/bin/zsh
 # rex-nvim: nvim integration for the Rex terminal on macOS.
 #
-#   rex-nvim open FILE...     open files in the project's nvim, or in a tab of
+#   rex-nvim open FILE[:LINE[:COL]]...  open files in the project's nvim, or in a tab of
 #                             the Rex "files" session (glow for Markdown)
-#   rex-nvim edit [DIR]       start nvim in DIR, registered so `open` can reach it
+#   rex-nvim edit [DIR]       start nvim in DIR with the rex-nvim plugin loaded
 #   rex-nvim install [EXT...] build NvimOpen.app and make it the default app for
 #                             code and text files, so file hyperlinks land in nvim
 #
@@ -18,7 +18,7 @@ source $REX_NVIM_ROOT/lib/common.zsh
 source $REX_NVIM_ROOT/lib/registry.zsh
 
 usage() {
-  print -r -- "usage: rex-nvim open FILE... | edit [DIR] | install [EXT...]"
+  print -r -- "usage: rex-nvim open FILE[:LINE[:COL]]... | edit [DIR] | install [EXT...]"
 }
 
 case ${1:-} in

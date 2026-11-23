@@ -1,14 +1,18 @@
 # Shared setup for rex-nvim commands. Sourced by bin/rex-nvim.
 
-# LaunchServices starts NvimOpen.app with a bare PATH: make sure Homebrew's
-# nvim/glow and rex are found. rex ships inside the Rex Server bundle;
-# Versions/Current survives Rex updates.
+# LaunchServices starts NvimOpen.app with a bare PATH, so the tools rex-nvim
+# needs are appended as fallbacks. Appended, never prepended: from a shell the
+# user's own order must win (nvim started by `edit` inherits this PATH, and a
+# reordered PATH would give LSPs and :terminal a different node, python...).
+# rex ships inside the Rex Server bundle; Versions/Current survives updates.
 rex_bin="$HOME/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS"
-export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH:$rex_bin:/usr/local/bin:/usr/bin:/bin"
+typeset -U path
+path+=(/opt/homebrew/bin $HOME/.local/bin $rex_bin /usr/local/bin /usr/bin /bin)
 
-# Where running nvim instances register (see lib/registry.zsh).
-# REX_NVIM_STATE_DIR exists for tests: NvimOpen.app never sees shell variables,
-# so changing it in a profile would split `edit` and `open` apart.
+# Where running nvim instances register (see lib/registry.zsh and
+# nvim/lua/rex-nvim/registry.lua). REX_NVIM_STATE_DIR exists for tests:
+# NvimOpen.app never sees shell variables, so changing it in a profile would
+# split nvim and `open` apart.
 REX_NVIM_STATE=${REX_NVIM_STATE_DIR:-$HOME/.cache/rex-nvim}
 
 # Rex session that receives files no project nvim claims. The server cannot
@@ -22,4 +26,13 @@ REX_NVIM_FILES_SESSION=files
 notify() {
   print -r -- "rex-nvim: $1" >&2
   osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "rex-nvim"' -e 'end run' -- "$1" >/dev/null 2>&1
+}
+
+# with_timeout SECONDS COMMAND...: run COMMAND, killed by SIGALRM after
+# SECONDS (exit status 142). An nvim busy in a blocking command (:!npm test)
+# does not answer RPC until it finishes, and the click must not hang on it.
+with_timeout() {
+  local secs=$1
+  shift
+  perl -e 'alarm shift; exec @ARGV or exit 127' $secs "$@"
 }
