@@ -75,12 +75,21 @@ rex_nvim_keep_read() {
 # empties it). Written to a temporary file and moved into place, so a failed
 # write never leaves a truncated list behind.
 rex_nvim_keep_write() {
-  local dir=${REX_NVIM_KEEP_FILE:h} tmp
+  # The real file behind a symlink (a keep list kept in a dotfiles repo):
+  # replacing the link itself would cut it off from the repo.
+  local file=${REX_NVIM_KEEP_FILE:A} dir tmp
+  local -a want=(${(ou)@})
+  dir=${file:h}
+  # Unchanged list: leave the file, and the user's comments in it, alone.
+  if [[ -e $file ]]; then
+    rex_nvim_keep_read 2>/dev/null
+    [[ ${(j: :)reply} == ${(j: :)want} ]] && return 0
+  fi
   mkdir -p $dir || return
   tmp=$(mktemp $dir/.keep.XXXXXX) || return
   {
     print -r -- "# File types rex-nvim leaves on their current app (one extension per line)."
     print -r -- "# Written by rex-nvim install; edit freely."
-    if (( $# )); then print -rl -- ${(ou)@}; fi
-  } > $tmp && mv $tmp $REX_NVIM_KEEP_FILE || { rm -f $tmp; return 1 }
+    if (( ${#want} )); then print -rl -- $want; fi
+  } > $tmp && mv $tmp $file || { rm -f $tmp; return 1 }
 }

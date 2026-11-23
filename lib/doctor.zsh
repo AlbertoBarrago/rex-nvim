@@ -15,6 +15,7 @@ fail() { print -r -- "  FAIL  $1"; (( doctor_failures++ )) }
 rex_nvim_doctor() {
   local tool bin app_bin ext got probe
   local -a wrong kept_elsewhere kept
+  doctor_failures=0
 
   print "tools"
   for tool in nvim jq perl duti rex; do

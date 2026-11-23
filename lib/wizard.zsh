@@ -30,12 +30,15 @@ typeset -gA REX_NVIM_NOTES=(
 )
 
 # rex_nvim_wizard_rows: fill the global arrays wizard_exts (space-separated
-# extensions of a group), wizard_now (app opening it today), wizard_suggest
-# (nvim or keep) and wizard_note, for every group not already on NvimOpen;
-# and wizard_on_nvim with the extensions that are.
+# extensions of a group), wizard_now (apps opening it today, joined with /
+# when its members disagree), wizard_suggest (nvim or keep) and wizard_note,
+# for every group not fully on NvimOpen; and wizard_on_nvim with the
+# extensions that are. Every member is probed: .ts can open in NvimOpen
+# through the video type while .tsx opens elsewhere.
 rex_nvim_wizard_rows() {
-  local ext now pat member probe
-  local -a seen kept group
+  local ext pat member probe app
+  local -a seen kept group apps names
+  integer all_nvim owned
   typeset -ga wizard_exts=() wizard_now=() wizard_suggest=() wizard_note=() wizard_on_nvim=()
   rex_nvim_keep_read
   kept=($reply)
@@ -45,27 +48,30 @@ rex_nvim_wizard_rows() {
     rex_nvim_uti_group $ext
     group=($reply)
     seen+=($group)
-    : > $probe/probe.$ext
-    now=$(default_app $probe/probe.$ext)
-    if [[ $now == $REX_NVIM_APP ]] && (( ! ${kept[(Ie)$ext]} )); then
+    apps=()
+    all_nvim=1 owned=0
+    for member in $group; do
+      : > $probe/probe.$member
+      app=$(default_app $probe/probe.$member)
+      apps+=("$app")
+      [[ $app == $REX_NVIM_APP ]] || all_nvim=0
+      pat=${REX_NVIM_OWNERS[$member]:-}
+      [[ -n $pat && ${app:t:r} == ${~pat} ]] && owned=1
+    done
+    if (( all_nvim )) && (( ! ${kept[(Ie)$ext]} )); then
       wizard_on_nvim+=($group)
       continue
     fi
-    now=${${now:t:r}:-none}
+    names=()
+    for app in "${apps[@]}"; do names+=("${${app:t:r}:-none}"); done
     wizard_exts+=("$group")
-    wizard_now+=($now)
-    if (( ${kept[(Ie)$ext]} )); then
-      # An earlier choice stands until the user changes it.
+    wizard_now+=("${(j:/:)${(@u)names}}")
+    # An earlier keep stands until the user changes it; otherwise keep only
+    # what an owning IDE has.
+    if (( ${kept[(Ie)$ext]} || owned )); then
       wizard_suggest+=(keep)
     else
       wizard_suggest+=(nvim)
-      for member in $group; do
-        pat=${REX_NVIM_OWNERS[$member]:-}
-        if [[ -n $pat && $now == ${~pat} ]]; then
-          wizard_suggest[-1]=keep
-          break
-        fi
-      done
     fi
     wizard_note+=("${REX_NVIM_NOTES[$ext]:-}")
   done
@@ -128,10 +134,18 @@ rex_nvim_wizard_choose() {
 # only). Nothing existing is overwritten, and MODE auto only prints the
 # suggestion: the user's nvim config is never changed without a yes.
 rex_nvim_wizard_plugin() {
-  local mode=$1 app=${NVIM_APPNAME:-nvim} cfg target what answer
+  local mode=$1 app=${NVIM_APPNAME:-nvim} cfg target what answer tmp
   local dir=$REX_NVIM_ROOT/nvim
-  [[ $(plugin_loaded) == yes ]] && { print "nvim config already loads the rex-nvim plugin"; return 0 }
+  case $(plugin_loaded) in
+    yes) print "nvim config already loads the rex-nvim plugin"; return 0 ;;
+    no) ;;
+    # No answer proves nothing: never offer to change the config on it.
+    *) print "could not ask nvim whether its config loads the plugin: see README, Install"; return 0 ;;
+  esac
+  # Resolved: BSD grep -r does not follow a symlinked config directory (a
+  # config kept in a dotfiles repo), and would miss lazy.nvim in it.
   cfg=${XDG_CONFIG_HOME:-$HOME/.config}/$app
+  cfg=${cfg:A}
 
   if grep -rqsE "require[ (]*[\"']lazy[\"']" $cfg; then
     if [[ ! -d $cfg/lua/plugins ]] || ! grep -rqsE "import *= *[\"']plugins[\"']" $cfg; then
@@ -159,13 +173,23 @@ rex_nvim_wizard_plugin() {
 
   mkdir -p ${target:h} || return
   if [[ $target == *.lua ]]; then
-    # %q-free: the path goes into a Lua long string, which takes it verbatim.
-    print -r -- "-- Loads rex-nvim (written by rex-nvim install)." > $target &&
-    print -r -- "local dir = [==[$dir]==]" >> $target &&
-    print -r -- 'return {' >> $target &&
-    print -r -- '  { dir = dir, name = "rex-nvim", lazy = false, cond = vim.uv.fs_stat(dir) ~= nil },' >> $target &&
-    print -r -- '}' >> $target || { print -u2 "rex-nvim: could not write $target"; return 1 }
+    # Written whole to a temporary file, then hard-linked into place: ln
+    # fails if a file appeared meanwhile (a dotfiles sync during the prompt),
+    # and a failed write never leaves half a spec behind. The path goes into
+    # a Lua long string, which takes it verbatim.
+    tmp=$(mktemp ${target:h}/.rex-nvim.XXXXXX) || return
+    {
+      print -r -- "-- Loads rex-nvim (written by rex-nvim install)."
+      print -r -- "local dir = [==[$dir]==]"
+      print -r -- 'return {'
+      print -r -- '  { dir = dir, name = "rex-nvim", lazy = false, cond = vim.uv.fs_stat(dir) ~= nil },'
+      print -r -- '}'
+    } > $tmp && ln $tmp $target 2>/dev/null
+    integer written=$(( ! $? ))
+    rm -f $tmp
+    (( written )) || { print -u2 "rex-nvim: could not write $target (it may exist now)"; return 1 }
   else
+    # ln -s fails on an existing name, so it never replaces anything either.
     ln -s $dir $target || { print -u2 "rex-nvim: could not link $target"; return 1 }
   fi
   print "done: $what"
@@ -178,6 +202,9 @@ rex_nvim_wizard() {
   [[ ${1:-} == --yes ]] && mode=auto
   [[ -t 0 && -t 1 ]] || mode=auto
 
+  local -a keep
+  rex_nvim_install_preflight || return
+
   print "Which app opens each file type:"
   rex_nvim_wizard_rows || return
   rex_nvim_wizard_table
@@ -185,7 +212,17 @@ rex_nvim_wizard() {
     print "\nstopped: nothing changed"
     return 1
   fi
-  rex_nvim_keep_write $reply || { print -u2 "rex-nvim: could not write $REX_NVIM_KEEP_FILE"; return 1 }
-  rex_nvim_install || return
+  keep=($reply)
+  # The keep list changes only once the app is in place: a failed build
+  # leaves the previous choice as it was.
+  rex_nvim_install_app || return
+  rex_nvim_keep_write $keep || { print -u2 "rex-nvim: could not write $REX_NVIM_KEEP_FILE"; return 1 }
+  rex_nvim_bind ${${(k)REX_NVIM_TYPES}:|keep}
+  (( ${#keep} )) && print "keeping on their current app: ${(j:, :)keep}"
+  # A failed binding is still reported in the exit status, after the plugin
+  # step has had its turn.
+  rex_nvim_bind_report
+  integer bind_status=$?
   rex_nvim_wizard_plugin $mode
+  return bind_status
 }
