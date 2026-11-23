@@ -315,6 +315,24 @@ rex_nvim_wizard_plugin() {
   ui_say ok "done: $what"
 }
 
+# rex_nvim_wizard_rex: say whether the Rex app takes the actions a click
+# needs. Without Remote Control (Rex Settings, Rex Server) a file opens in a
+# session the app does not switch to. Only
+# reported, never a failure: the setting is the user's to change, and a Rex
+# app not running now proves nothing.
+rex_nvim_wizard_rex() {
+  local app
+  app=$(rex_app_client)
+  if [[ -z $app ]]; then
+    ui_say info "Rex app not running: in its Settings, Rex Server, turn on Remote Control"
+  elif rex_app_accepts_actions $app; then
+    ui_say ok "Rex app accepts actions (Remote Control on)"
+  else
+    ui_say warn "Rex app refuses actions: $REPLY"
+    ui_say warn "files would open in a session Rex does not show: turn on Remote Control in Rex Settings, Rex Server"
+  fi
+}
+
 # rex_nvim_wizard [--yes]: the whole flow. On a terminal that can show it
 # (lib/ui.zsh) it runs the picker, on a dumb one it asks line by line; with
 # --yes, or without a terminal, it takes the suggestions and changes no nvim
@@ -383,6 +401,8 @@ rex_nvim_wizard() {
   integer bind_status=$?
   [[ $mode == tui ]] && ui_section "nvim plugin"
   rex_nvim_wizard_plugin $mode
+  [[ $mode == tui ]] && ui_section Rex
+  rex_nvim_wizard_rex
   if [[ $mode == tui ]]; then
     print
     if (( bind_status )); then

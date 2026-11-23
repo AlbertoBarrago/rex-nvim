@@ -519,6 +519,13 @@ check "wizard binds what is not kept" grep -qx public.yaml $STUB_DUTI_LOG
 check "wizard does not bind what is kept" test -z "$(grep -x public.swift-source $STUB_DUTI_LOG)"
 check "wizard without a terminal prints no escape sequences" test -z "$(grep $'\e' $tmp/wizard.out)"
 
+check "wizard reports Remote Control on" grep -q 'Rex app accepts actions' $tmp/wizard.out
+STUB_REFUSE=1 rex_nvim_wizard --yes < /dev/null > $tmp/wizard.out 2>&1
+check "Remote Control off does not fail the wizard" test $? -eq 0
+check "wizard points at Remote Control when the app refuses actions" grep -q 'turn on Remote Control in Rex Settings' $tmp/wizard.out
+STUB_APP= rex_nvim_wizard --yes < /dev/null > $tmp/wizard.out 2>&1
+check "wizard without the Rex app still names Remote Control" grep -q 'Rex app not running: .*Remote Control' $tmp/wizard.out
+
 # An empty PATH, not one without the stubs: that would find the real duti.
 mkdir -p $tmp/empty-path
 ( PATH=$tmp/empty-path; rex_nvim_wizard --yes < /dev/null > /dev/null 2>&1 )
