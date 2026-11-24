@@ -26,11 +26,22 @@ Markdown no nvim already holds opens read-only in [glow](https://github.com/char
 brew install neovim duti jq glow
 git clone https://github.com/AlbertoBarrago/rex-nvim.git ~/Projects/rex-nvim
 ~/Projects/rex-nvim/install.sh     # links rex-nvim into ~/.local/bin
-rex-nvim install                   # asks which file types go to nvim, binds them
+rex-nvim install                   # asks the scope, then which file types go to nvim
 rex-nvim doctor                    # after confirming the dialogs
 ```
 
 In Rex, turn on **Remote Control** (Settings, Rex Server). Without it Rex refuses the `session.select` that brings the file's session into view: the file opens, but in a session you are not looking at, so a double-click seems to do nothing. `rex-nvim install` and `rex-nvim doctor` both check it.
+
+### Global, or only inside Rex
+
+`rex-nvim install` first asks where files should open in nvim:
+
+- **global** (the default): NvimOpen becomes the default app for code files, so Finder double-clicks and `file://` links clicked anywhere, Rex included, open in nvim. macOS asks to confirm each file type once.
+- **rex**: no file type is bound and no macOS dialog appears. Finder keeps opening files in your IDE. In Rex, `rex-nvim://` links (see "Links that jump to the line": ripgrep, delta) and `rex-nvim open` reach nvim; plain `file://` links clicked in Rex still go to the default app, because Rex hands them to macOS.
+
+The choice is saved in `~/.config/rex-nvim/scope` and kept by later runs (and by `--yes`); `rex-nvim install --scope global` or `--scope rex` sets it without asking. Switching from global to rex does not take file types back from NvimOpen: the previous app is unknown and each change would bring a dialog again. The install and `rex-nvim doctor` list them; give one back from Finder (Get Info, Open with, Change All). In the rex scope `rex-nvim install EXT...` refuses to bind.
+
+### Choosing file types (global)
 
 `rex-nvim install` lists every file type that does not open in nvim yet, with the app opening it today and a suggestion: nvim, or keep the current app when that app owns the type (Xcode for `.swift`, `.m`, `.mm`; Android Studio or IntelliJ IDEA for `.kt`, `.kts`, `.gradle`). In the picker, move with the arrows or `j`/`k`, toggle a type between nvim and keep with space, set every type to nvim with `a`, go back to the suggestions with `s`, apply with Enter, or stop without changes with `q` or Esc. On a terminal without cursor support (`TERM=dumb`) it asks line by line instead: Enter accepts the suggestions, `p` picks each type, `q` stops. Colors follow [`NO_COLOR`](https://no-color.org), and so does `rex-nvim doctor`. `rex-nvim install --yes`, or a run without a terminal, takes the suggestions without asking.
 
@@ -75,9 +86,9 @@ Rex may ask before opening a link with a custom scheme (Settings, Terminal, Link
 | --- | --- |
 | `rex-nvim open FILE[:LINE[:COL]]\|URL...` | Open files (or `rex-nvim://` links) as described above. This is what NvimOpen.app runs. |
 | `rex-nvim edit [DIR]` | Start nvim in `DIR` (default `.`) with the plugin loaded. |
-| `rex-nvim install [--yes]` | Build `~/Applications/NvimOpen.app`, ask which supported file types (listed in `lib/types.zsh`) go to nvim, bind them, and offer to load the plugin from the nvim config. |
-| `rex-nvim install EXT...` | Bind only these extensions to nvim, taking them off the keep list. |
-| `rex-nvim doctor` | Check tools, that the app points to this clone, which app really opens each file type (kept types included), that web links and `.html` still go to the browser, the Rex app and its Remote Control setting, that the nvim config loads the plugin, and the nvim open right now. |
+| `rex-nvim install [--yes] [--scope global\|rex]` | Build `~/Applications/NvimOpen.app`, ask the scope and, for global, which supported file types (listed in `lib/types.zsh`) go to nvim, bind them, and offer to load the plugin from the nvim config. |
+| `rex-nvim install EXT...` | Bind only these extensions to nvim, taking them off the keep list (global scope only). |
+| `rex-nvim doctor` | Check tools, that the app points to this clone, which app really opens each file type (kept types included; in the rex scope, the types still left on NvimOpen), that web links and `.html` still go to the browser, the Rex app and its Remote Control setting, that the nvim config loads the plugin, and the nvim open right now. |
 
 Errors are shown as macOS notifications and logged to `~/Library/Logs/rex-nvim.log`. If the clone moves, clicks report it until `rex-nvim install` is run again from the new place.
 

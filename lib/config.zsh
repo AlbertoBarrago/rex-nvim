@@ -1,6 +1,6 @@
-# Per-user choices: the file types the user keeps on another app (Xcode for
-# .swift, say). `rex-nvim install` leaves them alone and `rex-nvim doctor`
-# reports them as a choice, not a problem.
+# Per-user choices: the install scope (below), and the file types the user
+# keeps on another app (Xcode for .swift, say). `rex-nvim install` leaves
+# those alone and `rex-nvim doctor` reports them as a choice, not a problem.
 #
 # The keep file is data, never sourced: one extension per line, `#` starts a
 # comment. REX_NVIM_KEEP_FILE exists for tests; NvimOpen.app never reads it.
@@ -91,5 +91,59 @@ rex_nvim_keep_write() {
     print -r -- "# File types rex-nvim leaves on their current app (one extension per line)."
     print -r -- "# Written by rex-nvim install; edit freely."
     if (( ${#want} )); then print -rl -- $want; fi
+  } > $tmp && mv $tmp $file || { rm -f $tmp; return 1 }
+}
+
+# The install scope: global binds file types to NvimOpen (Finder
+# double-clicks and file:// links open in nvim, after one macOS dialog per
+# type); rex binds none, so only rex-nvim:// links and `rex-nvim open` reach
+# nvim, and Finder keeps the user's apps. A file with one word, global when
+# missing: installs made before the scope existed bound file types.
+# REX_NVIM_SCOPE_FILE exists for tests.
+REX_NVIM_SCOPE_FILE=${REX_NVIM_SCOPE_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/rex-nvim/scope}
+REX_NVIM_SCOPES=(global rex)
+
+# rex_nvim_scope_read: set REPLY to the saved scope, global when there is no
+# scope file. A file that cannot be read, or holds no known scope, fails
+# with a message on stderr and REPLY empty: falling back to global there
+# would bind file types, with their dialogs, for a user who chose rex.
+rex_nvim_scope_read() {
+  local line
+  REPLY=
+  if [[ ! -e $REX_NVIM_SCOPE_FILE && ! -L $REX_NVIM_SCOPE_FILE ]]; then
+    REPLY=global
+    return 0
+  fi
+  if [[ ! -f $REX_NVIM_SCOPE_FILE || ! -r $REX_NVIM_SCOPE_FILE ]]; then
+    print -u2 -r -- "rex-nvim: cannot read $REX_NVIM_SCOPE_FILE: fix it, or set the scope with: rex-nvim install --scope global|rex"
+    return 1
+  fi
+  for line in "${(@f)$(<$REX_NVIM_SCOPE_FILE)}"; do
+    line=${${line%%\#*}//[[:space:]]/}
+    [[ -n $line ]] || continue
+    if (( ${REX_NVIM_SCOPES[(Ie)$line]} )); then
+      REPLY=$line
+      return 0
+    fi
+    print -u2 -r -- "rex-nvim: $REX_NVIM_SCOPE_FILE: unknown scope: $line (global or rex)"
+    return 1
+  done
+  print -u2 -r -- "rex-nvim: $REX_NVIM_SCOPE_FILE: no scope in it (global or rex)"
+  return 1
+}
+
+# rex_nvim_scope_write SCOPE: save SCOPE, atomically and through a symlink,
+# like rex_nvim_keep_write.
+rex_nvim_scope_write() {
+  local file=${REX_NVIM_SCOPE_FILE:A} tmp
+  (( ${REX_NVIM_SCOPES[(Ie)$1]} )) || { print -u2 -r -- "rex-nvim: unknown scope: $1"; return 64 }
+  # mv into a directory would succeed and leave the scope unsaved.
+  [[ -d $file ]] && { print -u2 -r -- "rex-nvim: $file is a directory"; return 1 }
+  mkdir -p ${file:h} || return
+  tmp=$(mktemp ${file:h}/.scope.XXXXXX) || return
+  {
+    print -r -- "# Where rex-nvim opens files: global (Finder and file links) or rex (only inside Rex)."
+    print -r -- "# Written by rex-nvim install; change it with: rex-nvim install --scope global|rex"
+    print -r -- $1
   } > $tmp && mv $tmp $file || { rm -f $tmp; return 1 }
 }

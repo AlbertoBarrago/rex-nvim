@@ -34,6 +34,10 @@ Both sides must compare physical paths (symlinks resolved), and both must agree 
 - The Rex server cannot tell which session the app is showing (the app is attached to all of them), and `rex run` without `-s` fails with "session target default is ambiguous" when several sessions exist. Hence targets derived from the file (terminal cwds) and the `files` session. The app client action `session.select session_id=...` does switch the app's view.
 - `client.tab.new` performed from outside the app creates a **new session** per call and leaves empty sessions behind. `client.perform` cannot run `init.lua` actions on the app ("does not offer"), so a Lua action cannot learn the app's current session either.
 
+## Install scope (lib/config.zsh)
+
+`~/.config/rex-nvim/scope` holds `global` (bind file types, the default when the file is missing) or `rex` (bind nothing: only `rex-nvim://` links and `rex-nvim open` reach nvim, so no macOS dialog and Finder keeps the user's IDE). Rex cannot be told which app opens a clicked `file://` link (its settings only trust handler apps), so in the rex scope those links go to the default app. The rex scope never unbinds types left on NvimOpen by a global install: it reports them (wizard and doctor).
+
 ## LaunchServices rules (lib/types.zsh, lib/install.zsh)
 
 These come from real incidents; keep them:

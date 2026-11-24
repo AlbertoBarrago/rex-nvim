@@ -306,6 +306,7 @@ check "html is never bound" test -z "${REX_NVIM_TYPES[html]:-}${REX_NVIM_TYPES[h
 # --- keep list (lib/config.zsh) ----------------------------------------------
 
 export REX_NVIM_KEEP_FILE=$tmp/config/rex-nvim/keep
+export REX_NVIM_SCOPE_FILE=$tmp/config/rex-nvim/scope
 source $REX_NVIM_ROOT/lib/config.zsh
 
 rex_nvim_uti_group yml
@@ -334,6 +335,33 @@ check "half a type group is reported and not kept" grep -q 'yml shares its file 
 rex_nvim_keep_write
 rex_nvim_keep_read
 check "writing no extension empties the list" test -z "$reply"
+
+# --- install scope (lib/config.zsh) --------------------------------------------
+
+rex_nvim_scope_read
+check "missing scope file reads as global" test $REPLY = global
+rex_nvim_scope_write rex
+rex_nvim_scope_read
+check "scope round-trips" test $REPLY = rex
+check "an unknown scope is not written" test "$(rex_nvim_scope_write nope 2>/dev/null; print $?)" = 64
+rex_nvim_scope_read
+check "a refused write leaves the scope alone" test $REPLY = rex
+print -l '# comment' '' '  bogus' > $REX_NVIM_SCOPE_FILE
+check "an unknown scope in the file fails" test "$(rex_nvim_scope_read 2> $tmp/scope.err; print $?)" = 1
+check "an unknown scope in the file is reported" grep -q 'unknown scope: bogus' $tmp/scope.err
+print '# only a comment' > $REX_NVIM_SCOPE_FILE
+check "a scope file without a scope fails" test "$(rex_nvim_scope_read 2>/dev/null; print $?)" = 1
+rex_nvim_scope_write rex
+chmod 000 $REX_NVIM_SCOPE_FILE
+check "an unreadable scope file fails, never reads as global" test "$(rex_nvim_scope_read 2>/dev/null; print "$?:$REPLY")" = "1:"
+chmod 644 $REX_NVIM_SCOPE_FILE
+rm -f $REX_NVIM_SCOPE_FILE
+mkdir $REX_NVIM_SCOPE_FILE
+check "a directory at the scope path is not written into" test "$(rex_nvim_scope_write rex 2>/dev/null; print $?)" = 1
+check "a directory at the scope path is not read as global" test "$(rex_nvim_scope_read 2>/dev/null; print $?)" = 1
+rmdir $REX_NVIM_SCOPE_FILE
+# Later sections start from the default scope, as an install that predates it.
+rm -f $REX_NVIM_SCOPE_FILE
 
 # --- doctor -------------------------------------------------------------------
 
@@ -376,6 +404,7 @@ fake_app
 default_app() {
   case $1 in
     *.swift|*.m) print /Applications/Xcode.app ;;
+    rex-nvim://*) print $REX_NVIM_APP ;;
     *://*|*.html) print /Applications/Safari.app ;;
     *) print $REX_NVIM_APP ;;
   esac
@@ -409,6 +438,28 @@ STUB_REFUSE=1 rex_nvim_doctor > $tmp/doctor.out 2>&1
 check "doctor exits 1 when the app refuses actions" test $? -eq 1
 check "app refusing actions fails with Rex's reason" grep -q 'FAIL  Rex app refuses actions: Rex.app is not accepting actions' $tmp/doctor.out
 check "app refusing actions points at Remote Control" grep -q 'Remote Control' $tmp/doctor.out
+
+# Rex scope: types open elsewhere are the point; leftovers on NvimOpen warn.
+rex_nvim_keep_write swift m
+rex_nvim_scope_write rex
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor in the rex scope does not fail on types open elsewhere" test $? -eq 0
+check "doctor names the rex scope" grep -q 'ok    scope rex: file types stay on their apps' $tmp/doctor.out
+check "doctor warns on types left on NvimOpen" grep -q 'warn  still opening with NvimOpen: c, cjs' $tmp/doctor.out
+check "doctor in the rex scope ignores the keep list" test -z "$(grep 'kept on purpose' $tmp/doctor.out)"
+check "doctor checks that rex-nvim:// links reach NvimOpen" grep -q 'ok    rex-nvim:// links open with NvimOpen' $tmp/doctor.out
+rex_nvim_keep_write
+() {
+  default_app() { [[ $1 == *.html || $1 == *://* ]] && print /Applications/Safari.app || print /Applications/Xcode.app }
+  rex_nvim_doctor > $tmp/doctor.out 2>&1
+}
+check "no leftover, no warning" test -z "$(grep 'still opening with NvimOpen' $tmp/doctor.out)"
+check "rex-nvim:// links elsewhere fail in the rex scope" grep -q 'FAIL  rex-nvim:// links open with Safari' $tmp/doctor.out
+print bogus > $REX_NVIM_SCOPE_FILE
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor exits 1 on an unreadable scope" test $? -eq 1
+check "doctor names the bad scope" grep -q 'FAIL  .*unknown scope: bogus' $tmp/doctor.out
+rm -f $REX_NVIM_SCOPE_FILE
 
 # The real probe, against scratch configs: a plugin flagged after VimEnter
 # (as lazy.nvim's VeryLazy loads) counts, and the ShaDa file is not touched.
@@ -537,6 +588,67 @@ check "Remote Control off does not fail the wizard" test $? -eq 0
 check "wizard points at Remote Control when the app refuses actions" grep -q 'turn on Remote Control in Rex Settings' $tmp/wizard.out
 STUB_APP= rex_nvim_wizard --yes < /dev/null > $tmp/wizard.out 2>&1
 check "wizard without the Rex app still names Remote Control" grep -q 'Rex app not running: .*Remote Control' $tmp/wizard.out
+check "wizard --yes without a saved scope is global" test "$(grep -v '^#' $REX_NVIM_SCOPE_FILE)" = global
+
+# --- install scope: wizard and install EXT ----------------------------------
+
+# Line by line and picker, from a saved scope.
+rex_nvim_wizard_scope_ask global <<< '' > /dev/null
+check "scope question: Enter keeps the saved scope" test $REPLY = global
+print -l x r | rex_nvim_wizard_scope_ask global > /dev/null
+check "scope question: r picks rex, after an invalid answer" test $REPLY = rex
+check "scope question: q stops" test "$(rex_nvim_wizard_scope_ask global <<< q > /dev/null; print $?)" = 1
+scope_pick() { print -rn -- "$2" | rex_nvim_wizard_scope_pick $1 > $tmp/scope.out }
+scope_pick rex $'\n'
+check "scope picker: Enter keeps the saved scope" test $REPLY = rex
+scope_pick global $'j\n'
+check "scope picker: j moves to rex" test $REPLY = rex
+scope_pick rex $'\e[A\n'
+check "scope picker: up moves to global" test $REPLY = global
+check "scope picker: the final frame names the choice" grep -q 'scope: global' $tmp/scope.out
+check "scope picker: q stops" test "$(scope_pick global q; print $?)" = 1
+
+# The rex scope binds nothing and says what a global install left behind.
+: > $STUB_DUTI_LOG
+rex_nvim_wizard --yes --scope rex < /dev/null > $tmp/wizard.out 2>&1
+check "wizard --scope rex succeeds" test $? -eq 0
+check "wizard --scope rex binds nothing" test ! -s $STUB_DUTI_LOG
+check "wizard --scope rex saves the scope" test "$(rex_nvim_scope_read; print $REPLY)" = rex
+check "wizard --scope rex lists the types still on NvimOpen" grep -q 'still opening with NvimOpen from a global install: c, cjs' $tmp/wizard.out
+check "wizard --scope rex still offers the plugin and checks Rex" grep -q 'Rex app accepts actions' $tmp/wizard.out
+rex_nvim_wizard --yes < /dev/null > $tmp/wizard.out 2>&1
+check "wizard --yes keeps a saved rex scope" test ! -s $STUB_DUTI_LOG
+STUB_BUILD_FAIL=1 rex_nvim_wizard --yes --scope global < /dev/null > /dev/null 2>&1
+check "a failed build leaves the scope alone" test "$(rex_nvim_scope_read; print $REPLY)" = rex
+
+check "install EXT refuses in the rex scope" test "$(rex_nvim_install swift 2>&1 >/dev/null; print $?)" = "rex-nvim: the scope is rex, so no file type is bound; to bind them: rex-nvim install --scope global
+1"
+check "install EXT in the rex scope binds nothing" test ! -s $STUB_DUTI_LOG
+
+rex_nvim_wizard --yes --scope global < /dev/null > /dev/null 2>&1
+check "wizard --scope global binds again" grep -qx public.yaml $STUB_DUTI_LOG
+check "wizard --scope global saves the scope" test "$(rex_nvim_scope_read; print $REPLY)" = global
+check "an empty scope is a usage error, not the saved one" test "$(rex_nvim_wizard --yes --scope '' < /dev/null 2>/dev/null; print $?)" = 64
+check "an empty --scope= is a usage error" test "$(rex_nvim_wizard --yes --scope= < /dev/null 2>/dev/null; print $?)" = 64
+print bogus > $REX_NVIM_SCOPE_FILE
+: > $STUB_DUTI_LOG
+check "wizard stops on a bad scope file" test "$(rex_nvim_wizard --yes < /dev/null 2>/dev/null >/dev/null; print $?)" = 1
+check "install EXT stops on a bad scope file" test "$(rex_nvim_install swift 2>/dev/null >/dev/null; print $?)" = 1
+check "a bad scope file binds nothing" test ! -s $STUB_DUTI_LOG
+check "an unknown scope is a usage error" test "$(rex_nvim_wizard --yes --scope nope < /dev/null 2>/dev/null; print $?)" = 64
+check "an unknown option is a usage error" test "$(rex_nvim_wizard --nope < /dev/null 2>/dev/null; print $?)" = 64
+check "--scope needs a value" test "$(rex_nvim_wizard --scope < /dev/null 2>/dev/null; print $?)" = 64
+rm -f $REX_NVIM_SCOPE_FILE
+
+# The real build (osacompile into scratch, never registered): the rex scope
+# app declares no file type, not even the applet's default "*".
+mkdir -p $tmp/build-rex $tmp/build-global
+rex_nvim_build_app $tmp/build-rex/NvimOpen.app rex 2>/dev/null
+check "rex build: the app is built" test -r $tmp/build-rex/NvimOpen.app/Contents/Info.plist
+check "rex build: no document types declared" test -z "$(plutil -extract CFBundleDocumentTypes raw -o - $tmp/build-rex/NvimOpen.app/Contents/Info.plist 2>/dev/null)"
+check "rex build: the rex-nvim scheme is kept" grep -q '<string>rex-nvim</string>' $tmp/build-rex/NvimOpen.app/Contents/Info.plist
+rex_nvim_build_app $tmp/build-global/NvimOpen.app 2>/dev/null
+check "global build: exact types declared" test "$(plutil -extract CFBundleDocumentTypes.0.LSHandlerRank raw -o - $tmp/build-global/NvimOpen.app/Contents/Info.plist)" = Alternate
 
 # An empty PATH, not one without the stubs: that would find the real duti.
 mkdir -p $tmp/empty-path
