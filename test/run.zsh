@@ -26,7 +26,9 @@ trap cleanup EXIT
 stubs=$tmp/stubs
 mkdir -p $stubs
 # The rex stub answers from fixtures in $STUB_FIX: sessions.json (rex ls),
-# blocks-<session>.json (rex block ls), pwd-<block>.json (block call pwd);
+# blocks-<session>.json (rex block ls), pwd-<block>.json (block call pwd),
+# windows-<session>.json (rex window ls); `rex run --json` answers with the
+# new tab's window $STUB_NEW_WINDOW (window:new by default);
 # $STUB_APP, when set, is the connected app client; $STUB_REFUSE, when set,
 # makes the app refuse every action, as Rex does with Remote Control off.
 cat > $stubs/rex <<'EOF'
@@ -47,6 +49,9 @@ case "$1 $2" in
       print -r -- '{"clients":[]}'
     fi ;;
   "block ls") fix blocks-$4.json '{"blocks":[]}' ;;
+  "window ls") fix windows-$4.json '{"windows":[]}' ;;
+  "run "*)
+    [[ " $* " == *" --json "* ]] && print -r -- "{\"window_id\":\"${STUB_NEW_WINDOW:-window:new}\"}" ;;
   "block call") fix pwd-$6.json '{}' ;;
 esac
 EOF
@@ -156,6 +161,13 @@ check "project file loads in the project's nvim" test "$(ask $pid_parent 'expand
 check "project nvim pane gets the focus" grep -q -- "rex focus -s s1 b-app-link" $STUB_LOG
 check "project file never opens a tab" test -z "$(grep 'rex \(new\|run\)' $STUB_LOG)"
 
+# nvim in another tab of its session: the app is shown that tab.
+print -r -- '{"active_window_id":"window:other","windows":[{"window_id":"window:other","layers":[{"blocks":[{"block_id":"b-x"}]}]},{"window_id":"window:nv","layers":[{"blocks":[{"block_id":"b-y"},{"block_id":"b-app-link"}]}]}]}' > $STUB_FIX/windows-s1.json
+: > $STUB_LOG
+rex_nvim_open $parent/a.ts
+check "the app is shown the project nvim's tab" grep -q -- "rex do -C client:app session.select session_id=s1 window_id=window:nv" $STUB_LOG
+rm $STUB_FIX/windows-s1.json
+
 rex_nvim_open $parent/lines.txt:4
 check "FILE:LINE puts the cursor on the line" test "$(ask $pid_parent 'line(".")')" = 4
 rex_nvim_open $parent/lines.txt:2:3
@@ -197,7 +209,7 @@ check "FILE:LINE in a new tab starts nvim on the line" grep -q -- "-- nvim +3 --
 print -r -- '{"sessions":[{"session_id":"session:f1","label":"files"}]}' > $STUB_FIX/sessions.json
 rex_nvim_open $loose/Main.java
 check "existing files session is reused" grep -q -- "rex run -s session:f1 .*-- nvim -- $loose/Main.java" $STUB_LOG
-check "the app is shown the target session" grep -q -- "rex do -C client:app session.select session_id=session:f1" $STUB_LOG
+check "the app is shown the new tab" grep -q -- "rex do -C client:app session.select session_id=session:f1 window_id=window:new" $STUB_LOG
 
 # Remote Control off: the file still opens, but the app stays on its session,
 # so the refusal must reach the user instead of looking like a dead click.
@@ -231,7 +243,7 @@ print -r -- "{\"pwd\":\"file://somehost${proj2// /%20}\"}" > $STUB_FIX/pwd-block
 print -r -- "{\"pwd\":\"file://somehost$HOME\"}" > $STUB_FIX/pwd-block:hm.json
 : > $STUB_LOG
 rex_nvim_open $proj2/src/util.py
-check "terminal cwd claims the file for its session" grep -q -- "rex run -s session:p2 -c $proj2 --label util.py -- nvim -- $proj2/src/util.py" $STUB_LOG
+check "terminal cwd claims the file for its session" grep -q -- "rex run -s session:p2 -c $proj2 --label util.py --json -- nvim -- $proj2/src/util.py" $STUB_LOG
 # A shell sitting in HOME would be an ancestor of every file under it.
 mkdir -p $tmp/other
 : > $tmp/other/x.py

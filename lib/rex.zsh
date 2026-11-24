@@ -36,15 +36,19 @@ rex_app_accepts_actions() {
   return 1
 }
 
-# rex_show_session APP SESSION: make the Rex app show SESSION and come to the
-# front. Rex's own focus commands move focus inside a session only; the app
-# keeps showing whatever session it was on. A refused session.select is
-# reported: the file did open, but in a session the user is not looking at.
+# rex_show_session APP SESSION [WINDOW]: make the Rex app show SESSION (on
+# WINDOW, when given) and come to the front. Rex's own focus commands move
+# focus inside a session only, and only on the server: the app keeps showing
+# whatever session and window it was on, so a new tab would open unseen. A
+# refused session.select is reported: the file did open, but where the user
+# is not looking.
 rex_show_session() {
   [[ -n $1 && -n $2 ]] || return 1
   local err
+  local -a args=(session_id=$2)
+  [[ -n ${3:-} ]] && args+=(window_id=$3)
   integer rc=0
-  if ! err=$(rex do -C $1 session.select session_id=$2 2>&1 >/dev/null); then
+  if ! err=$(rex do -C $1 session.select $args 2>&1 >/dev/null); then
     notify "Rex did not switch to the file's session: ${${err#Error: }:-rex do failed}"
     rc=1
   fi
@@ -55,6 +59,18 @@ rex_show_session() {
 # rex_session_by_label LABEL: print the id of the first session with LABEL.
 rex_session_by_label() {
   rex ls --json | jq -r --arg l $1 '[.sessions[] | select(.label==$l)][0].session_id // empty'
+}
+
+# rex_active_window SESSION: print the id of SESSION's active window.
+rex_active_window() {
+  rex window ls -s $1 --json 2>/dev/null | jq -r '.active_window_id // empty'
+}
+
+# rex_block_window SESSION BLOCK: print the id of the window of SESSION that
+# holds BLOCK.
+rex_block_window() {
+  rex window ls -s $1 --json 2>/dev/null | jq -r --arg b $2 \
+    '[.windows[] | select(any(.layers[].blocks[]; .block_id == $b))][0].window_id // empty'
 }
 
 # rex_file_url_path URL: print the local path of a file:// URL (any host),
