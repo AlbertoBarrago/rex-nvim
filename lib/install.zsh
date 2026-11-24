@@ -2,7 +2,8 @@
 # default app for the file types in lib/types.zsh, so file hyperlinks and Finder
 # double-clicks open in nvim inside Rex. Types in the keep list
 # (lib/config.zsh) are left on their app. With EXT arguments, only those
-# extensions are bound, and they leave the keep list.
+# extensions are bound, and they leave the keep list. In the rex scope
+# (lib/config.zsh) nothing is bound and this refuses.
 #
 # macOS asks the user to confirm every default-handler change (one dialog per
 # type), so only types not already on NvimOpen are bound: a rerun asks only
@@ -12,10 +13,12 @@ source $REX_NVIM_ROOT/lib/types.zsh
 source $REX_NVIM_ROOT/lib/config.zsh
 source $REX_NVIM_ROOT/lib/ui.zsh
 
-# rex_nvim_build_app DEST: compile and configure NvimOpen.app at DEST.
+# rex_nvim_build_app DEST [SCOPE]: compile and configure NvimOpen.app at
+# DEST. SCOPE (lib/config.zsh, default global) decides whether the app
+# declares the file types; in the rex scope it handles only its URL scheme.
 rex_nvim_build_app() {
   setopt local_options err_return
-  local dest=$1 bin=$REX_NVIM_ROOT/bin/rex-nvim
+  local dest=$1 scope=${2:-global} bin=$REX_NVIM_ROOT/bin/rex-nvim
   local as_path sed_path plist utis_json="" ext
   local -a all_utis
 
@@ -37,6 +40,17 @@ rex_nvim_build_app() {
   plutil -replace CFBundleURLTypes -json '[{"CFBundleURLName": "rex-nvim file link", "CFBundleURLSchemes": ["rex-nvim"]}]' $plist
   # Where the applet looks for the CLI, for `rex-nvim doctor` to check.
   plutil -replace RexNvimBin -string $bin $plist
+
+  if [[ $scope == rex ]]; then
+    # osacompile declares every file ("*") for an applet with an open
+    # handler. Left in place, macOS could pick NvimOpen on its own for a
+    # type no other app claims, and would offer it for every file: the rex
+    # scope must not touch what Finder opens, so nothing is declared.
+    plutil -remove CFBundleDocumentTypes $plist
+    codesign --force --sign - $dest 2>/dev/null
+    plutil -lint -s $plist
+    return
+  fi
 
   for ext in $REX_NVIM_IMPORTED; do
     utis_json+="{
@@ -71,16 +85,17 @@ rex_nvim_install_preflight() {
   done
 }
 
-# rex_nvim_install_app: build NvimOpen.app, put it in place of the installed
-# one and register it with LaunchServices.
+# rex_nvim_install_app [SCOPE]: build NvimOpen.app for SCOPE (see
+# rex_nvim_build_app), put it in place of the installed one and register it
+# with LaunchServices.
 rex_nvim_install_app() {
-  local build
+  local build scope=${1:-global}
   # Build into a scratch dir and swap only once the app is complete:
   # LaunchServices keeps NvimOpen as default handler, so a half-built or
   # missing app would leave every bound file type with nothing to open it.
   build=$(mktemp -d) || return
   trap "rm -rf ${(q)build}" EXIT
-  if ! rex_nvim_build_app $build/NvimOpen.app; then
+  if ! rex_nvim_build_app $build/NvimOpen.app $scope; then
     print -u2 "rex-nvim: could not build NvimOpen.app; the installed one is untouched"
     return 1
   fi
@@ -141,6 +156,13 @@ rex_nvim_install() {
   ui_init
 
   rex_nvim_install_preflight $@ || return
+  # Binding a type in the rex scope would bring back the dialogs and the
+  # Finder takeover that scope was chosen to avoid: the switch is explicit.
+  rex_nvim_scope_read || return 1
+  if [[ $REPLY == rex ]]; then
+    print -u2 "rex-nvim: the scope is rex, so no file type is bound; to bind them: rex-nvim install --scope global"
+    return 1
+  fi
   rex_nvim_keep_read
   kept=($reply)
   if (( $# )); then
@@ -156,7 +178,7 @@ rex_nvim_install() {
     (( ${#kept} )) && ui_say info "keeping on their current app: ${(j:, :)kept} (listed in $REX_NVIM_KEEP_FILE)"
   fi
 
-  rex_nvim_install_app || return
+  rex_nvim_install_app global || return
   rex_nvim_bind $selected
 
   # A group leaves the keep list only when none of its types failed: a failed

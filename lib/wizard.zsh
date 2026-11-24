@@ -1,8 +1,9 @@
-# rex-nvim install with no extension: show which app opens each file type
-# today, suggest nvim or keeping the current app, let the user accept or pick
-# per type, then write the keep list (lib/config.zsh) and bind the rest
-# (lib/install.zsh). A last step offers to load the nvim plugin from the
-# user's config when it does not yet.
+# rex-nvim install with no extension: first ask for the scope (lib/config.zsh):
+# global or only inside Rex. Global shows which app opens each file type
+# today, suggests nvim or keeping the current app, lets the user accept or
+# pick per type, then writes the keep list (lib/config.zsh) and binds the
+# rest (lib/install.zsh). Rex builds the app and binds nothing. A last step
+# offers to load the nvim plugin from the user's config when it does not yet.
 #
 # One row per content-type group, not per extension: macOS binds types, so
 # yaml and yml (or ts and tsx) can only move together.
@@ -315,12 +316,12 @@ rex_nvim_wizard_plugin() {
   ui_say ok "done: $what"
 }
 
-# rex_nvim_wizard_rex: say whether the Rex app takes the actions a click
+# rex_nvim_wizard_rex_app: say whether the Rex app takes the actions a click
 # needs. Without Remote Control (Rex Settings, Rex Server) a file opens in a
 # session the app does not switch to. Only
 # reported, never a failure: the setting is the user's to change, and a Rex
 # app not running now proves nothing.
-rex_nvim_wizard_rex() {
+rex_nvim_wizard_rex_app() {
   local app
   app=$(rex_app_client)
   if [[ -z $app ]]; then
@@ -333,25 +334,132 @@ rex_nvim_wizard_rex() {
   fi
 }
 
-# rex_nvim_wizard [--yes]: the whole flow. On a terminal that can show it
-# (lib/ui.zsh) it runs the picker, on a dumb one it asks line by line; with
-# --yes, or without a terminal, it takes the suggestions and changes no nvim
-# config.
-rex_nvim_wizard() {
-  local mode=ask out
-  [[ ${1:-} == --yes ]] && mode=auto
-  [[ -t 0 && -t 1 ]] || mode=auto
-  ui_init
-  [[ $mode == ask ]] && (( ui_on )) && mode=tui
-  # Styling goes with the picker: the line-by-line and automatic runs keep
-  # their plain output even when stdout alone is a terminal.
-  [[ $mode == tui ]] || ui_on=0
+# Shown for each scope, in the picker and the line-by-line question.
+typeset -gA REX_NVIM_SCOPE_DESC=(
+  global 'Finder double-clicks and file links open in nvim (macOS asks once per file type)'
+  rex    'only inside Rex, through rex-nvim:// links; Finder keeps its apps, no macOS dialogs'
+)
 
+# rex_nvim_wizard_scope_ask CURRENT: ask for the scope line by line, Enter
+# keeps CURRENT; set REPLY to global or rex. Fails when the user quits or
+# stdin ends.
+rex_nvim_wizard_scope_ask() {
+  local answer
+  print "Where should files open in nvim?"
+  print -r -- "  [g]lobal: $REX_NVIM_SCOPE_DESC[global]"
+  print -r -- "  [r]ex:    $REX_NVIM_SCOPE_DESC[rex]"
+  while true; do
+    print -n -- "[g] or [r], Enter for $1, [q] quit: "
+    read -r answer || return 1
+    case $answer in
+      '') REPLY=$1; return 0 ;;
+      g|G) REPLY=global; return 0 ;;
+      r|R) REPLY=rex; return 0 ;;
+      q|Q) return 1 ;;
+    esac
+  done
+}
+
+# rex_nvim_wizard_scope_pick CURRENT: the terminal picker for the scope,
+# starting on CURRENT; set REPLY to global or rex. Arrows or j/k move, Enter
+# applies; q, Esc or the end of input fail. Drawn in place like
+# rex_nvim_wizard_pick, and two rows fit any terminal.
+rex_nvim_wizard_scope_pick() {
+  integer cur=1 drawn=0 done=0
+  [[ $1 == rex ]] && cur=2
+
+  # _rex_nvim_scope_draw ACTIVE: one frame; the chosen row keeps its mark,
+  # and without ACTIVE the key line becomes the choice.
+  _rex_nvim_scope_draw() {
+    local active=$1 mark name desc line
+    local -a out
+    integer j room=$(( ui_cols - 3 - 6 - 2 ))
+    (( room < 0 )) && room=0
+    for (( j = 1; j <= ${#REX_NVIM_SCOPES}; j++ )); do
+      mark=' ' name=${(r:6:)REX_NVIM_SCOPES[j]}
+      if (( j == cur )); then
+        mark="${ui_c[cyan]}${ui_g[cursor]}${ui_c[off]}"
+        name="${ui_c[b]}${name}${ui_c[off]}"
+      fi
+      desc=${REX_NVIM_SCOPE_DESC[${REX_NVIM_SCOPES[j]}]}
+      (( ${#desc} > room )) && desc=${desc[1,room]}
+      out+=(" $mark ${name}  ${ui_c[dim]}$desc${ui_c[off]}")
+    done
+    if (( active )); then
+      out+=("   ${ui_c[dim]}${ui_g[move]} move  ${ui_g[enter]} apply  q quit${ui_c[off]}")
+    else
+      out+=("   ${ui_c[dim]}scope: ${REX_NVIM_SCOPES[cur]}${ui_c[off]}")
+    fi
+    (( drawn )) && print -n -- $'\e['"${drawn}A"
+    for line in "${out[@]}"; do
+      print -r -- $'\e[2K\r'"$line"
+    done
+    drawn=${#out}
+  }
+
+  (( ui_on )) && print -n -- $'\e[?25l\e[?7l'
+  _rex_nvim_scope_draw 1
+  while ui_key; do
+    case $REPLY in
+      up|k) cur=1 ;;
+      down|j) cur=2 ;;
+      enter) done=1; break ;;
+      q|Q|esc) break ;;
+    esac
+    _rex_nvim_scope_draw 1
+  done
+  _rex_nvim_scope_draw 0
+  unfunction _rex_nvim_scope_draw
+  (( ui_on )) && print -n -- $'\e[?25h\e[?7h'
+  (( done )) || return 1
+  REPLY=${REX_NVIM_SCOPES[cur]}
+}
+
+# rex_nvim_wizard_on_nvimopen [PROGRESS]: set reply to the extensions macOS
+# opens with NvimOpen today. In the rex scope these are leftovers of a
+# global install. PROGRESS is called as in rex_nvim_wizard_rows.
+rex_nvim_wizard_on_nvimopen() {
+  local progress=${1:-} ext probe
+  local -a on
+  integer probed=0
+  probe=$(mktemp -d) || return 1
+  for ext in ${(ko)REX_NVIM_TYPES}; do
+    : > $probe/probe.$ext
+    [[ $(default_app $probe/probe.$ext) == $REX_NVIM_APP ]] && on+=($ext)
+    (( probed++ ))
+    [[ -n $progress ]] && $progress $probed ${#REX_NVIM_TYPES}
+  done
+  rm -rf $probe
+  reply=($on)
+}
+
+# rex_nvim_wizard_build MODE SCOPE: build and register NvimOpen.app for
+# SCOPE, under a spinner in MODE tui.
+rex_nvim_wizard_build() {
+  local out scope=$2
+  [[ $1 == tui ]] || { rex_nvim_install_app $scope; return }
+  # Its errors are collected, not printed under the spinner's line. The
+  # build has no effect on this shell, so a subshell loses nothing.
+  ui_spin_start "building NvimOpen.app"
+  out=$(rex_nvim_install_app $scope 2>&1)
+  integer build_status=$?
+  ui_spin_stop
+  if (( build_status )); then
+    ui_status fail "${${out#rex-nvim: }:-could not build NvimOpen.app}"
+    return build_status
+  fi
+  ui_status ok "NvimOpen.app built and registered"
+}
+
+# rex_nvim_wizard_global MODE: the global scope: pick the file types, build
+# the app, bind them. Fails when the user stops or the build fails; a
+# failed binding sets bind_status instead, so the later steps still run.
+rex_nvim_wizard_global() {
+  local mode=$1
   local -a keep
   rex_nvim_install_preflight || return
 
   if [[ $mode == tui ]]; then
-    ui_banner install
     ui_section Scan
     rex_nvim_wizard_rows rex_nvim_wizard_scan_progress || { ui_progress_clear; return 1 }
     ui_progress_clear
@@ -374,35 +482,102 @@ rex_nvim_wizard() {
   fi
   keep=($reply)
 
-  # The keep list changes only once the app is in place: a failed build
-  # leaves the previous choice as it was.
-  if [[ $mode == tui ]]; then
-    ui_section Apply
-    # Its errors are collected, not printed under the spinner's line. The
-    # build has no effect on this shell, so a subshell loses nothing.
-    ui_spin_start "building NvimOpen.app"
-    out=$(rex_nvim_install_app 2>&1)
-    integer build_status=$?
-    ui_spin_stop
-    if (( build_status )); then
-      ui_status fail "${${out#rex-nvim: }:-could not build NvimOpen.app}"
-      return build_status
-    fi
-    ui_status ok "NvimOpen.app built and registered"
-  else
-    rex_nvim_install_app || return
-  fi
+  # The keep list and the scope change only once the app is in place: a
+  # failed build leaves the previous choice as it was.
+  [[ $mode == tui ]] && ui_section Apply
+  rex_nvim_wizard_build $mode global || return
   rex_nvim_keep_write $keep || { ui_say fail "could not write $REX_NVIM_KEEP_FILE"; return 1 }
+  rex_nvim_scope_write global || { ui_say fail "could not write $REX_NVIM_SCOPE_FILE"; return 1 }
   rex_nvim_bind ${${(k)REX_NVIM_TYPES}:|keep}
   (( ${#keep} )) && ui_say info "keeping on their current app: ${(j:, :)keep}"
-  # A failed binding is still reported in the exit status, after the plugin
-  # step has had its turn.
   rex_nvim_bind_report
-  integer bind_status=$?
+  bind_status=$?
+  return 0
+}
+
+# rex_nvim_wizard_rex MODE: the rex scope: build the app for its rex-nvim://
+# scheme only (claimed by no other app, so no dialog, and no file type
+# declared, see rex_nvim_build_app), bind nothing, and point at
+# file types a global install left on NvimOpen. They are not handed back
+# automatically: the app they had is unknown, and every change would bring
+# a macOS dialog again.
+rex_nvim_wizard_rex() {
+  local mode=$1
+  [[ $mode == tui ]] && ui_section Apply
+  rex_nvim_wizard_build $mode rex || return
+  rex_nvim_scope_write rex || { ui_say fail "could not write $REX_NVIM_SCOPE_FILE"; return 1 }
+  ui_say ok "no file type bound: Finder and file:// links keep their apps"
+  if [[ $mode == tui ]]; then
+    rex_nvim_wizard_on_nvimopen rex_nvim_wizard_scan_progress || { ui_progress_clear; return 1 }
+    ui_progress_clear
+  else
+    rex_nvim_wizard_on_nvimopen || return
+  fi
+  if (( ${#reply} )); then
+    ui_say warn "still opening with NvimOpen from a global install: ${(j:, :)reply}"
+    ui_say warn "to give one back: Finder, Get Info on such a file, Open with, Change All"
+  fi
+  return 0
+}
+
+# rex_nvim_wizard [--yes] [--scope global|rex]: the whole flow. It asks for
+# the scope first (unless --scope gives it), then runs the scope's steps,
+# then the nvim plugin and Rex checks. On a terminal that can show it
+# (lib/ui.zsh) it runs the pickers, on a dumb one it asks line by line;
+# with --yes, or without a terminal, it keeps the saved scope, takes the
+# suggestions and changes no nvim config.
+rex_nvim_wizard() {
+  local mode=ask scope=
+  # Given, even empty: an empty --scope "$VAR" must fail, not ask or bind.
+  integer scope_given=0
+  while (( $# )); do
+    case $1 in
+      --yes) mode=auto ;;
+      --scope)
+        (( $# > 1 )) || { print -u2 "rex-nvim: --scope needs global or rex"; return 64 }
+        scope=$2 scope_given=1
+        shift ;;
+      --scope=*) scope=${1#--scope=} scope_given=1 ;;
+      *) print -u2 -r -- "rex-nvim: unknown option: $1"; return 64 ;;
+    esac
+    shift
+  done
+  if (( scope_given )) && (( ! ${REX_NVIM_SCOPES[(Ie)$scope]} )); then
+    print -u2 -r -- "rex-nvim: unknown scope: $scope (global or rex)"
+    return 64
+  fi
+  [[ -t 0 && -t 1 ]] || mode=auto
+  ui_init
+  [[ $mode == ask ]] && (( ui_on )) && mode=tui
+  # Styling goes with the picker: the line-by-line and automatic runs keep
+  # their plain output even when stdout alone is a terminal.
+  [[ $mode == tui ]] || ui_on=0
+
+  [[ $mode == tui ]] && ui_banner install
+  if (( ! scope_given )); then
+    rex_nvim_scope_read || return 1
+    case $mode in
+      auto) scope=$REPLY ;;
+      tui)
+        ui_section Scope
+        rex_nvim_wizard_scope_pick $REPLY || { print; ui_say warn "stopped: nothing changed"; return 1 }
+        scope=$REPLY ;;
+      ask)
+        rex_nvim_wizard_scope_ask $REPLY || { print "\nstopped: nothing changed"; return 1 }
+        scope=$REPLY ;;
+    esac
+  fi
+  [[ $mode == tui ]] || print -r -- "scope: $scope"
+
+  # Set by the global scope's binding step: a failed binding is still
+  # reported in the exit status, after the plugin step has had its turn.
+  integer bind_status=0
+  rex_nvim_wizard_$scope $mode || return
+
   [[ $mode == tui ]] && ui_section "nvim plugin"
   rex_nvim_wizard_plugin $mode
   [[ $mode == tui ]] && ui_section Rex
-  rex_nvim_wizard_rex
+  rex_nvim_wizard_rex_app
   if [[ $mode == tui ]]; then
     print
     if (( bind_status )); then
