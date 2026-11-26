@@ -13,7 +13,7 @@ zsh test/run.zsh                       # full suite (plugin, registry, open, edi
 for f in bin/rex-nvim lib/*.zsh test/run.zsh; do zsh -n $f; done; sh -n install.sh   # syntax
 ./install.sh                           # link bin/rex-nvim into ~/.local/bin
 rex-nvim install [EXT...]              # rebuild NvimOpen.app and bind file types
-rex-nvim doctor                        # real default app per type, browser, registry
+rex-nvim doctor [--fix]                # real default app per type, browser, registry (--fix: drop unreachable regs)
 ```
 
 There is no single-test runner: `test/run.zsh` is one script of `check NAME COMMAND...` calls. To focus, comment out sections or run it and grep its `FAIL:` lines.

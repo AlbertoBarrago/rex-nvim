@@ -88,7 +88,7 @@ Rex may ask before opening a link with a custom scheme (Settings, Terminal, Link
 | `rex-nvim edit [DIR]` | Start nvim in `DIR` (default `.`) with the plugin loaded. |
 | `rex-nvim install [--yes] [--scope global\|rex]` | Build `~/Applications/NvimOpen.app`, ask the scope and, for global, which supported file types (listed in `lib/types.zsh`) go to nvim, bind them, and offer to load the plugin from the nvim config. |
 | `rex-nvim install EXT...` | Bind only these extensions to nvim, taking them off the keep list (global scope only). |
-| `rex-nvim doctor` | Check tools, that the app points to this clone, which app really opens each file type (kept types included; in the rex scope, the types still left on NvimOpen), that web links and `.html` still go to the browser, the Rex app and its Remote Control setting, that the nvim config loads the plugin, and the nvim open right now. |
+| `rex-nvim doctor [--fix]` | Check tools, that the app points to this clone, which app really opens each file type (kept types included; in the rex scope, the types still left on NvimOpen), that web links and `.html` still go to the browser, the Rex app and its Remote Control setting, that the nvim config loads the plugin, and that each nvim open right now answers on its RPC socket. `--fix` removes the registrations whose socket is gone (restart that nvim to register it again); it changes nothing else. |
 
 Errors are shown as macOS notifications and logged to `~/Library/Logs/rex-nvim.log`. If the clone moves, clicks report it until `rex-nvim install` is run again from the new place.
 
