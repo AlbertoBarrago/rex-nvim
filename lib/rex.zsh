@@ -61,6 +61,12 @@ rex_session_by_label() {
   rex ls --json | jq -r --arg l $1 '[.sessions[] | select(.label==$l)][0].session_id // empty'
 }
 
+# rex_block_session BLOCK: print the id of the session holding BLOCK. Rex
+# takes a block id wherever a session goes and answers with that session.
+rex_block_session() {
+  rex window ls -s $1 --json 2>/dev/null | jq -r '.session_id // empty'
+}
+
 # rex_active_window SESSION: print the id of SESSION's active window.
 rex_active_window() {
   rex window ls -s $1 --json 2>/dev/null | jq -r '.active_window_id // empty'

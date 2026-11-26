@@ -11,7 +11,10 @@
 REX_NVIM_SEND_TIMEOUT=3
 
 # rex_nvim_read_reg FILE: set reply=(ROOT SESSION BLOCK SERVER), or fail when
-# FILE is malformed.
+# FILE is malformed. SESSION is empty when the pane had no $REX_SESSION (Rex
+# no longer exports it); rex_nvim_reg_session resolves it from BLOCK. Copy
+# reply quoted ("${reply[@]}"): an unquoted copy drops the empty SESSION and
+# shifts BLOCK and SERVER down one place.
 rex_nvim_read_reg() {
   reply=("${(@f)$(<$1)}")
   (( ${#reply} == 4 )) && [[ -n $reply[1] && -n $reply[4] ]]
@@ -47,13 +50,23 @@ rex_nvim_find() {
   [[ -n $best ]] && print -r -- $best
 }
 
+# rex_nvim_reg_session SESSION BLOCK: print SESSION, or when it is empty the
+# session Rex says holds BLOCK (needs lib/rex.zsh).
+rex_nvim_reg_session() {
+  if [[ -n $1 ]]; then
+    print -r -- $1
+  else
+    rex_block_session $2
+  fi
+}
+
 # rex_nvim_find_in_session SESSION: print the most recently focused live
 # registration in SESSION, whatever its root.
 rex_nvim_find_in_session() {
   local reg
   for reg in ${(f)"$(rex_nvim_live_regs)"}; do
     rex_nvim_read_reg $reg || continue
-    if [[ $reply[2] == $1 ]]; then
+    if [[ "$(rex_nvim_reg_session "$reply[2]" "$reply[3]")" == $1 ]]; then
       print -r -- $reg
       return 0
     fi

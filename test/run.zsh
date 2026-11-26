@@ -93,8 +93,9 @@ check() {
 
 # serve DIR [SESSION]: start a headless nvim in DIR with the plugin loaded, as
 # if it ran in Rex block b-<dirname>; set REPLY to its pid once registered.
+# An empty SESSION leaves $REX_SESSION empty, as Rex does today.
 serve() {
-  local dir=$1 session=${2:-s1}
+  local dir=$1 session=${2-s1}
   (
     builtin cd -- $dir
     export REX_BLOCK=b-${dir:t} REX_SESSION=$session
@@ -251,6 +252,33 @@ check "busy nvim is reported" grep -q 'is busy' $tmp/notify.log
 rex_nvim_ping $reply[4]
 check "ping: a busy nvim times out" test $? -eq 142
 
+# A pane without $REX_SESSION registers an empty session: the nvim is still
+# reached, and its session comes from Rex (window ls on the block).
+nosess=$tmp/nosess
+mkdir -p $nosess
+print -l x y z > $nosess/n.ts
+serve $nosess "" && pid_nosess=$REPLY
+rex_nvim_read_reg $REX_NVIM_STATE_DIR/$pid_nosess.reg
+check "no REX_SESSION: registration keeps four lines" test ${#reply} -eq 4 -a -z "$reply[2]"
+print -r -- '{"session_id":"session:ns","active_window_id":"window:ns","windows":[{"window_id":"window:ns","layers":[{"blocks":[{"block_id":"b-nosess"}]}]}]}' > $STUB_FIX/windows-b-nosess.json
+cp $STUB_FIX/windows-b-nosess.json $STUB_FIX/windows-session:ns.json
+: > $STUB_LOG; : > $tmp/notify.log
+rex_nvim_open $nosess/n.ts:2
+check "no REX_SESSION: file loads in the project's nvim" test "$(ask $pid_nosess 'expand("%:p") . ":" . line(".")')" = $nosess/n.ts:2
+check "no REX_SESSION: nvim is not reported busy" test -z "$(grep 'busy' $tmp/notify.log)"
+check "no REX_SESSION: focus targets the session Rex reports" grep -q -- "rex focus -s session:ns b-nosess" $STUB_LOG
+check "no REX_SESSION: the app is shown that session and tab" grep -q -- "session.select session_id=session:ns window_id=window:ns" $STUB_LOG
+check "no REX_SESSION: no new tab" test -z "$(grep 'rex \(new\|run\)' $STUB_LOG)"
+# Rex cannot place the block either: the block id stands in as the target.
+rm $STUB_FIX/windows-b-nosess.json
+: > $STUB_LOG
+rex_nvim_open $nosess/n.ts
+check "unknown session: focus falls back to the block id" grep -q -- "rex focus -s b-nosess b-nosess" $STUB_LOG
+check "unknown session: the file still loads" test "$(ask $pid_nosess 'expand("%:p")')" = $nosess/n.ts
+check "unknown session: the app is never sent the block as a session" test -z "$(grep 'session.select session_id=b-nosess' $STUB_LOG)"
+kill $pid_nosess; wait $pid_nosess 2>/dev/null
+rm -f $STUB_FIX/windows-session:ns.json
+
 # --- open: unclaimed files ---------------------------------------------------
 
 loose=$tmp/loose
@@ -293,6 +321,20 @@ check "files session nvim means no new tab" test -z "$(grep 'rex \(new\|run\)' $
 : > $STUB_LOG
 rex_nvim_open $loose/notes.md
 check "markdown still opens in glow beside the files nvim" grep -q -- "rex run -s session:f1 .*-- glow -p $loose/notes.md" $STUB_LOG
+
+# The files nvim without $REX_SESSION: Rex places its block in the files
+# session, so it still serves unclaimed files.
+kill $pid_files; wait $pid_files 2>/dev/null
+filesdir2=$tmp/filesdir2
+mkdir -p $filesdir2
+serve $filesdir2 "" && pid_files2=$REPLY
+print -r -- '{"session_id":"session:f1","windows":[]}' > $STUB_FIX/windows-b-filesdir2.json
+: > $STUB_LOG
+rex_nvim_open $loose/Main.java
+check "files nvim without REX_SESSION receives unclaimed files" test "$(ask $pid_files2 'expand("%:p")')" = $loose/Main.java
+check "files nvim without REX_SESSION means no new tab" test -z "$(grep 'rex \(new\|run\)' $STUB_LOG)"
+rm $STUB_FIX/windows-b-filesdir2.json
+kill $pid_files2; wait $pid_files2 2>/dev/null
 
 # A terminal sitting in the file's project claims it: new nvim tab there.
 proj2=$tmp/proj2

@@ -32,6 +32,7 @@ Both sides must compare physical paths (symlinks resolved), and both must agree 
 ## Rex constraints (verified, do not re-try)
 
 - The Rex server cannot tell which session the app is showing (the app is attached to all of them), and `rex run` without `-s` fails with "session target default is ambiguous" when several sessions exist. Hence targets derived from the file (terminal cwds) and the `files` session. The app client action `session.select session_id=...` does switch the app's view.
+- Rex no longer exports `$REX_SESSION` in panes (only `$REX_BLOCK`), so registrations usually carry an empty session line. `rex window ls -s BLOCK --json` answers with the session holding BLOCK (`rex_block_session`); `open` resolves it there. Copy a registration's `reply` quoted (`"${reply[@]}"`) and quote its fields as arguments: zsh drops empty unquoted words, which once shifted the RPC address into the wrong slot and made every registered nvim look busy.
 - `client.tab.new` performed from outside the app creates a **new session** per call and leaves empty sessions behind. `client.perform` cannot run `init.lua` actions on the app ("does not offer"), so a Lua action cannot learn the app's current session either.
 
 ## Install scope (lib/config.zsh)
