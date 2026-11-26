@@ -59,15 +59,21 @@ rex_nvim_parse_url() {
 # rex_nvim_send FILE LINE COL REG: focus the registered nvim's pane, then open
 # FILE there through the plugin's open() (see nvim/lua/rex-nvim/init.lua).
 # Fails, after a notification, when nvim does not answer in time or refuses.
-# Sets reply=(SESSION WINDOW) to where nvim runs (WINDOW may be empty).
+# Sets reply=(SESSION WINDOW) to where nvim runs (either may be empty: an
+# unknown session is never guessed, so the app is not asked to show it).
 rex_nvim_send() {
   local file=$1 line=$2 col=$3 reg=$4 out expr
   integer rc
   rex_nvim_read_reg $reg || return 1
-  local -a meta=($reply)
+  local -a meta=("${reply[@]}")
+  # Without a session in the registration, ask Rex. The block id stands in
+  # as a target for Rex commands, never as a session id for the app.
+  local sid target
+  sid=$(rex_nvim_reg_session "$meta[2]" "$meta[3]")
+  target=${sid:-$meta[3]}
   # Focus first: anything nvim shows while opening (a message, an error) is
   # then in front of the user.
-  rex focus -s $meta[2] $meta[3] >/dev/null 2>&1
+  rex focus -s $target $meta[3] >/dev/null 2>&1
   # A Vim string literal: single quotes, with inner quotes doubled.
   expr="luaeval('require(\"rex-nvim\").open(_A[1], _A[2], _A[3])', ['${file//\'/\'\'}', $line, $col])"
   out=$(with_timeout $REX_NVIM_SEND_TIMEOUT nvim --server $meta[4] --remote-expr $expr 2>&1)
@@ -80,7 +86,7 @@ rex_nvim_send() {
     notify "nvim on ${meta[1]:t} could not open ${file:t}: ${out:-exit $rc}"
     return 1
   fi
-  reply=($meta[2] "$(rex_block_window $meta[2] $meta[3])")
+  reply=("$sid" "$(rex_block_window $target $meta[3])")
   return 0
 }
 
