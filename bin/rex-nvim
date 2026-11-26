@@ -25,7 +25,7 @@ source $REX_NVIM_ROOT/lib/registry.zsh
 source $REX_NVIM_ROOT/lib/rex.zsh
 
 usage() {
-  print -r -- "usage: rex-nvim open FILE[:LINE[:COL]]... | edit [DIR] | install [--yes] [--scope global|rex] | install EXT... | doctor"
+  print -r -- "usage: rex-nvim open FILE[:LINE[:COL]]... | edit [DIR] | install [--yes] [--scope global|rex] | install EXT... | doctor [--fix]"
 }
 
 case ${1:-} in
@@ -54,8 +54,12 @@ case ${1:-} in
     fi
     ;;
   doctor)
+    shift
     source $REX_NVIM_ROOT/lib/doctor.zsh
-    rex_nvim_doctor
+    rex_nvim_doctor "$@"
+    integer doctor_status=$?
+    (( doctor_status == 64 )) && usage >&2
+    exit $doctor_status
     ;;
   -h|--help|help)
     usage

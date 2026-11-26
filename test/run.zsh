@@ -471,6 +471,28 @@ rex_nvim_doctor > $tmp/doctor.out 2>&1
 check "doctor exits 1 on an unreachable socket" test $? -eq 1
 check "unreachable socket fails with its address" grep -q "FAIL  nvim $$ on $work/up: socket /sock/dead not reachable" $tmp/doctor.out
 check "unreachable socket suggests a restart" grep -q 'restart that nvim' $tmp/doctor.out
+check "unreachable socket points at --fix" grep -q 'rex-nvim doctor --fix' $tmp/doctor.out
+check "without --fix the registration stays" test -e $REX_NVIM_STATE/$$.reg
+
+# --fix removes only the unreachable registration. Another live pid: the
+# suite's subshell parent is $$, so use a sleeping child for the second one.
+sleep 60 &
+alive_pid=$!
+print -l $work/busy s1 b2 /sock/busy > $REX_NVIM_STATE/$alive_pid.reg
+rex_nvim_doctor --fix > $tmp/doctor.out 2>&1
+check "doctor --fix exits 0 once the dead socket is gone" test $? -eq 0
+check "doctor --fix removes the unreachable registration" test ! -e $REX_NVIM_STATE/$$.reg
+check "doctor --fix reports the removal" grep -q "warn  nvim $$ on $work/up: socket gone, registration removed" $tmp/doctor.out
+check "doctor --fix keeps a busy registration" test -e $REX_NVIM_STATE/$alive_pid.reg
+print -l $work/up s1 b1 /sock/up > $REX_NVIM_STATE/$$.reg
+rex_nvim_doctor --fix > $tmp/doctor.out 2>&1
+check "doctor --fix keeps an answering registration" test -e $REX_NVIM_STATE/$$.reg
+kill $alive_pid; wait $alive_pid 2>/dev/null
+rex_nvim_doctor --bogus > $tmp/doctor.out 2>&1
+check "doctor rejects an unknown option" test $? -eq 64
+rex_nvim_doctor --fix extra > $tmp/doctor.out 2>&1
+check "doctor rejects extra arguments" test $? -eq 64
+check "a rejected option runs no check" test -z "$(grep -i 'tools' $tmp/doctor.out)"
 rm -rf $REX_NVIM_STATE
 REX_NVIM_STATE=$saved_state
 source $REX_NVIM_ROOT/lib/registry.zsh

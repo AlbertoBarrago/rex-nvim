@@ -43,9 +43,19 @@ rex_nvim_doctor_rex_scope() {
   fi
 }
 
+# rex_nvim_doctor [--fix]: run every check. --fix removes the registrations
+# whose RPC socket is unreachable, so `open` stops trying them; nothing else
+# is changed. Returns 1 when a problem is left, 64 on an unknown option.
 rex_nvim_doctor() {
   local tool bin app_bin ext got probe
   local -a wrong kept_elsewhere kept
+  integer fix=0
+  case ${1:-} in
+    "") ;;
+    --fix) fix=1 ;;
+    *) print -u2 "rex-nvim: doctor: unknown option $1"; return 64 ;;
+  esac
+  (( $# <= 1 )) || { print -u2 "rex-nvim: doctor: too many arguments"; return 64 }
   doctor_failures=0
   ui_init
   ui_banner doctor
@@ -169,8 +179,15 @@ rex_nvim_doctor() {
       0)   ok $name ;;
       142) warn "$name is busy" ;;
       *)
-        fail "$name: socket $reply[4] not reachable"
-        ui_detail "files for that project cannot reach it; restart that nvim" ;;
+        # The plugin rewrites the registration when that nvim regains focus
+        # (same dead address): removing it only spares `open` the attempt
+        # until then. Restarting nvim is the real cure.
+        if (( fix )) && rm -f $reg; then
+          warn "$name: socket gone, registration removed; restart that nvim"
+        else
+          fail "$name: socket $reply[4] not reachable"
+          ui_detail "files for that project cannot reach it; restart that nvim, or run rex-nvim doctor --fix"
+        fi ;;
     esac
   done
   (( live )) || ui_status info "no nvim open in a Rex pane right now"
