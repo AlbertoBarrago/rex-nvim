@@ -842,7 +842,13 @@ check "the spec is valid Lua returning a spec" test "$($real_nvim --headless --c
 print -r -- '-- mine' > $spec
 check "writing the spec leaves no temporary file" test "$(print -l $lazycfg/lua/plugins/.*(N))" = ""
 STUB_PLUGIN=no rex_nvim_wizard_plugin ask <<< y > $tmp/plugin.out
-check "an existing spec is never overwritten" test "$(<$spec)" = '-- mine'
+# The read sits on its own line, with its status kept: an intermittent
+# "no such file or directory: " (empty name) was once reported on the check
+# below while the check passed. Its line number now tells the read apart
+# from whatever runs alongside the comparison.
+spec_contents=$(<$spec)
+spec_read=$?
+check "an existing spec is never overwritten" test "$spec_read:$spec_contents" = '0:-- mine'
 rm $spec
 STUB_PLUGIN= rex_nvim_wizard_plugin ask <<< y > $tmp/plugin.out
 check "no answer from nvim offers no config change" test ! -e $spec
