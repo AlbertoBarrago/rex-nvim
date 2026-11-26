@@ -153,6 +153,11 @@ print -l $work/gone s1 b-gone /nonexistent.sock > $REX_NVIM_STATE_DIR/999999.reg
 rex_nvim_live_regs >/dev/null
 check "registration of a dead pid is removed" test ! -e $REX_NVIM_STATE_DIR/999999.reg
 
+rex_nvim_read_reg $REX_NVIM_STATE_DIR/$pid_parent.reg
+check "ping: a running nvim answers" rex_nvim_ping $reply[4]
+rex_nvim_ping $tmp/nonexistent.sock
+check "ping: a missing socket is unreachable" test $? -eq 1
+
 # --- open: registered nvim ----------------------------------------------------
 
 : > $STUB_LOG
@@ -188,6 +193,9 @@ rex_nvim_open "$spaced/c d.ts"
 check "busy nvim times out instead of hanging" test $(( EPOCHSECONDS - start )) -le $(( REX_NVIM_SEND_TIMEOUT + 2 ))
 check "busy nvim falls back to a tab" grep -q -- "rex new files .*-- nvim --" $STUB_LOG
 check "busy nvim is reported" grep -q 'is busy' $tmp/notify.log
+# Still inside its :!sleep 8, about 3 s in.
+rex_nvim_ping $reply[4]
+check "ping: a busy nvim times out" test $? -eq 142
 
 # --- open: unclaimed files ---------------------------------------------------
 
@@ -438,6 +446,34 @@ STUB_REFUSE=1 rex_nvim_doctor > $tmp/doctor.out 2>&1
 check "doctor exits 1 when the app refuses actions" test $? -eq 1
 check "app refusing actions fails with Rex's reason" grep -q 'FAIL  Rex app refuses actions: Rex.app is not accepting actions' $tmp/doctor.out
 check "app refusing actions points at Remote Control" grep -q 'Remote Control' $tmp/doctor.out
+
+# Registered nvim: each one is pinged. Registrations with a live pid (the
+# suite's own) and a stubbed ping keyed on the server address.
+saved_state=$REX_NVIM_STATE
+REX_NVIM_STATE=$tmp/doctor-state
+mkdir -p $REX_NVIM_STATE
+rex_nvim_ping() {
+  case $1 in
+    *busy*) return 142 ;;
+    *dead*) return 1 ;;
+  esac
+}
+print -l $work/up s1 b1 /sock/up > $REX_NVIM_STATE/$$.reg
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor exits 0 when nvim answers" test $? -eq 0
+check "answering nvim is ok" grep -q "ok    nvim $$ on $work/up" $tmp/doctor.out
+print -l $work/up s1 b1 /sock/busy > $REX_NVIM_STATE/$$.reg
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor exits 0 when nvim is busy" test $? -eq 0
+check "busy nvim only warns" grep -q "warn  nvim $$ on $work/up is busy" $tmp/doctor.out
+print -l $work/up s1 b1 /sock/dead > $REX_NVIM_STATE/$$.reg
+rex_nvim_doctor > $tmp/doctor.out 2>&1
+check "doctor exits 1 on an unreachable socket" test $? -eq 1
+check "unreachable socket fails with its address" grep -q "FAIL  nvim $$ on $work/up: socket /sock/dead not reachable" $tmp/doctor.out
+check "unreachable socket suggests a restart" grep -q 'restart that nvim' $tmp/doctor.out
+rm -rf $REX_NVIM_STATE
+REX_NVIM_STATE=$saved_state
+source $REX_NVIM_ROOT/lib/registry.zsh
 
 # Rex scope: types open elsewhere are the point; leftovers on NvimOpen warn.
 rex_nvim_keep_write swift m
