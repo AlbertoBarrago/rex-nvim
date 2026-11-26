@@ -153,6 +153,60 @@ print -l $work/gone s1 b-gone /nonexistent.sock > $REX_NVIM_STATE_DIR/999999.reg
 rex_nvim_live_regs >/dev/null
 check "registration of a dead pid is removed" test ! -e $REX_NVIM_STATE_DIR/999999.reg
 
+# A deleted socket is reopened on the next write. The nvim listens on A (the
+# registered address, in its own directory) and on a control address C that
+# survives, to drive it once A is gone.
+heal=$tmp/heal
+mkdir -p $heal/a $heal/proj
+(
+  builtin cd -- $heal/proj
+  export REX_BLOCK=b-heal REX_SESSION=s1
+  exec $real_nvim --headless --clean --listen $heal/a/nvim.sock --cmd "set rtp^=$REX_NVIM_ROOT/nvim" \
+    -c 'runtime plugin/rex-nvim.lua' -c "call serverstart('$heal/c.sock')"
+) >/dev/null 2>&1 &
+pid_heal=$!
+server_pids+=($pid_heal)
+repeat 50; do [[ -e $REX_NVIM_STATE_DIR/$pid_heal.reg && -S $heal/c.sock ]] && break; sleep 0.1; done
+# focus_heal: fire FocusGained through the control address, then print the
+# registered address.
+focus_heal() {
+  $real_nvim --server $heal/c.sock --remote-expr 'execute("doautocmd FocusGained")' >/dev/null 2>&1
+  rex_nvim_read_reg $REX_NVIM_STATE_DIR/$pid_heal.reg && print -r -- $reply[4]
+}
+check "heal: --listen address is registered" test "$(focus_heal)" = $heal/a/nvim.sock
+rm $heal/a/nvim.sock
+check "heal: a deleted socket is unreachable" test -z "$($real_nvim --server $heal/a/nvim.sock --remote-expr 1 2>/dev/null)"
+check "heal: focus reopens the socket at the same path" test "$(focus_heal)" = $heal/a/nvim.sock
+check "heal: the reopened socket answers" rex_nvim_ping $heal/a/nvim.sock
+before=$(stat -f %i $heal/a/nvim.sock)
+focus_heal >/dev/null
+check "heal: a live socket is left alone" test "$(stat -f %i $heal/a/nvim.sock)" = $before
+rm -r $heal/a
+healed=$(focus_heal)
+check "heal: with its directory gone, a fresh address is registered" test -n "$healed" -a "$healed" != $heal/a/nvim.sock
+check "heal: the fresh address answers" rex_nvim_ping $healed
+check "heal: the deleted directory is not recreated" test ! -e $heal/a
+kill $pid_heal; wait $pid_heal 2>/dev/null
+
+# A TCP address has no file: it is registered as is, never restarted. Port 0
+# lets the system pick a free one; the registration holds the real address.
+(
+  builtin cd -- $heal/proj
+  export REX_BLOCK=b-tcp REX_SESSION=s1
+  exec $real_nvim --headless --clean --listen 127.0.0.1:0 --cmd "set rtp^=$REX_NVIM_ROOT/nvim" -c 'runtime plugin/rex-nvim.lua'
+) >/dev/null 2>&1 &
+pid_tcp=$!
+server_pids+=($pid_tcp)
+repeat 50; do [[ -e $REX_NVIM_STATE_DIR/$pid_tcp.reg ]] && break; sleep 0.1; done
+rex_nvim_read_reg $REX_NVIM_STATE_DIR/$pid_tcp.reg
+tcp_addr=$reply[4]
+check "heal: a TCP address is registered" test "${tcp_addr%:*}" = 127.0.0.1 -a "${tcp_addr##*:}" != 0
+$real_nvim --server $tcp_addr --remote-expr 'execute("doautocmd FocusGained")' >/dev/null 2>&1
+rex_nvim_read_reg $REX_NVIM_STATE_DIR/$pid_tcp.reg
+check "heal: a TCP address is kept" test "$reply[4]" = $tcp_addr
+check "heal: a TCP address keeps a single listener" test "$($real_nvim --server $tcp_addr --remote-expr 'len(serverlist())' 2>/dev/null)" = 1
+kill $pid_tcp; wait $pid_tcp 2>/dev/null
+
 rex_nvim_read_reg $REX_NVIM_STATE_DIR/$pid_parent.reg
 check "ping: a running nvim answers" rex_nvim_ping $reply[4]
 rex_nvim_ping $tmp/nonexistent.sock
@@ -470,7 +524,7 @@ print -l $work/up s1 b1 /sock/dead > $REX_NVIM_STATE/$$.reg
 rex_nvim_doctor > $tmp/doctor.out 2>&1
 check "doctor exits 1 on an unreachable socket" test $? -eq 1
 check "unreachable socket fails with its address" grep -q "FAIL  nvim $$ on $work/up: socket /sock/dead not reachable" $tmp/doctor.out
-check "unreachable socket suggests a restart" grep -q 'restart that nvim' $tmp/doctor.out
+check "unreachable socket suggests focusing or restarting" grep -q 'focus that nvim to reopen its socket, restart it' $tmp/doctor.out
 check "unreachable socket points at --fix" grep -q 'rex-nvim doctor --fix' $tmp/doctor.out
 check "without --fix the registration stays" test -e $REX_NVIM_STATE/$$.reg
 
