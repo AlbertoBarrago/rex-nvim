@@ -13,10 +13,6 @@
 # 2 or 3. A registered nvim that is busy or fails falls back to 2 and 3.
 # The Rex app is launched if needed and shown the target session and tab.
 
-# Seconds to wait for a registered nvim. Busy nvim (:!cmd, a blocking plugin)
-# answer only when done; past this the file opens elsewhere.
-REX_NVIM_SEND_TIMEOUT=3
-
 # rex_nvim_parse_target ARG: set reply=(FILE LINE COL) from FILE, FILE:LINE or
 # FILE:LINE:COL (LINE and COL are 0 when absent). A name that exists as given
 # wins, so a file really named "a:1" is never split.

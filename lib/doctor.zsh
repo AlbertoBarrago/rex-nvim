@@ -153,12 +153,25 @@ rex_nvim_doctor() {
     no)  fail "nvim config does not load the rex-nvim plugin (see README, Install)" ;;
     *)   warn "could not ask nvim whether its config loads the plugin (no answer in 15s)" ;;
   esac
-  local reg
-  integer live=0
+  # A live pid is not enough: `open` talks to the RPC socket, which can be
+  # gone while nvim runs (removed by a cleanup of $TMPDIR, for one).
+  local reg name
+  integer live=0 rc
   for reg in ${(f)"$(rex_nvim_live_regs)"}; do
     rex_nvim_read_reg $reg || continue
     (( live++ ))
-    ok "nvim ${reg:t:r} on ${reply[1]/#$HOME/~}"
+    name="nvim ${reg:t:r} on ${reply[1]/#$HOME/~}"
+    ui_spin_start "pinging $name"
+    rex_nvim_ping $reply[4]
+    rc=$?
+    ui_spin_stop
+    case $rc in
+      0)   ok $name ;;
+      142) warn "$name is busy" ;;
+      *)
+        fail "$name: socket $reply[4] not reachable"
+        ui_detail "files for that project cannot reach it; restart that nvim" ;;
+    esac
   done
   (( live )) || ui_status info "no nvim open in a Rex pane right now"
 

@@ -6,6 +6,10 @@
 # address. It refreshes the file when the pane gains focus, so the newest
 # mtime marks the most recently used nvim.
 
+# Seconds to wait for a registered nvim. Busy nvim (:!cmd, a blocking plugin)
+# answer only when done; past this `open` sends the file elsewhere.
+REX_NVIM_SEND_TIMEOUT=3
+
 # rex_nvim_read_reg FILE: set reply=(ROOT SESSION BLOCK SERVER), or fail when
 # FILE is malformed.
 rex_nvim_read_reg() {
@@ -55,4 +59,18 @@ rex_nvim_find_in_session() {
     fi
   done
   return 1
+}
+
+# rex_nvim_ping SERVER: ask the nvim at the RPC address SERVER to evaluate 1.
+# Returns 0 when it answers, 142 when it stays silent past
+# REX_NVIM_SEND_TIMEOUT (busy), 1 when the address is unreachable (a live pid
+# whose socket was removed or belongs to nothing).
+rex_nvim_ping() {
+  local out
+  out=$(with_timeout $REX_NVIM_SEND_TIMEOUT nvim --server $1 --remote-expr 1 2>/dev/null)
+  case $? in
+    0) [[ $out == 1 ]] ;;
+    142) return 142 ;;
+    *) return 1 ;;
+  esac
 }
