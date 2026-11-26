@@ -179,14 +179,14 @@ rex_nvim_doctor() {
       0)   ok $name ;;
       142) warn "$name is busy" ;;
       *)
-        # The plugin rewrites the registration when that nvim regains focus
-        # (same dead address): removing it only spares `open` the attempt
-        # until then. Restarting nvim is the real cure.
+        # The plugin reopens the socket and registers again when that nvim
+        # regains focus; removing the registration spares `open` the attempt
+        # until then.
         if (( fix )) && rm -f $reg; then
-          warn "$name: socket gone, registration removed; restart that nvim"
+          warn "$name: socket gone, registration removed; focus that nvim to register it again"
         else
           fail "$name: socket $reply[4] not reachable"
-          ui_detail "files for that project cannot reach it; restart that nvim, or run rex-nvim doctor --fix"
+          ui_detail "files for that project cannot reach it; focus that nvim to reopen its socket, restart it, or run rex-nvim doctor --fix"
         fi ;;
     esac
   done
